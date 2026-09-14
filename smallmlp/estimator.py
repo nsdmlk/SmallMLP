@@ -1,0 +1,114 @@
+import numpy as np
+import torch
+from sklearn.base import BaseEstimator, RegressorMixin
+from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
+
+from .core import forward
+from .loss import loo_huber_loss
+
+
+class SmallMLPRegressor(BaseEstimator, RegressorMixin):
+    """Small-data regressor: weighted soft-median + data-dependent zone.
+
+    Non-parametric: the only learnable parameter is the bandwidth vector h.
+    predict() returns a point; predict_zone() returns (point, delta).
+    """
+
+    def __init__(self, h_init=1.0, max_iter=200, tol=1e-6, verbose=False):
+        self.h_init = h_init
+        self.max_iter = max_iter
+        self.tol = tol
+        self.verbose = verbose
+
+    @staticmethod
+    def _softplus_inv(x):
+        return np.log(np.expm1(x))
+
+    def fit(self, X, y):
+        X, y = check_X_y(X, y, dtype=np.float64)
+        self.n_features_in_ = X.shape[1]
+
+        self._x_mean = X.mean(axis=0)
+        self._x_std = X.std(axis=0)
+        self._x_std[self._x_std == 0] = 1.0
+        self._y_mean = float(y.mean())
+        y_std = float(y.std())
+        self._y_std = y_std if y_std > 0 else 1.0
+
+        Xs = (X - self._x_mean) / self._x_std
+        ys = (y - self._y_mean) / self._y_std
+
+        X_t = torch.tensor(Xs, dtype=torch.float64)
+        y_t = torch.tensor(ys, dtype=torch.float64)
+
+        psi0 = self._softplus_inv(self.h_init)
+        psi = torch.nn.Parameter(
+            torch.full((self.n_features_in_,), psi0, dtype=torch.float64)
+        )
+
+        optimizer = torch.optim.LBFGS(
+            [psi],
+            max_iter=20,
+            tolerance_grad=self.tol,
+            tolerance_change=self.tol,
+            line_search_fn="strong_wolfe",
+        )
+
+        prev_loss = None
+        for it in range(self.max_iter):
+            def closure():
+                optimizer.zero_grad()
+                loss = loo_huber_loss(psi, X_t, y_t, forward)
+                loss.backward()
+                return loss
+
+            loss = optimizer.step(closure)
+            loss_val = float(loss.detach())
+
+            if self.verbose:
+                print(f"[SmallMLP] iter {it:3d}  loss={loss_val:.6e}")
+
+            if prev_loss is not None and abs(prev_loss - loss_val) < self.tol:
+                break
+            prev_loss = loss_val
+
+        self._psi = psi.detach()
+        self._X_train = X_t
+        self._y_train = y_t
+        self._loss_ = prev_loss
+        return self
+
+    def _prepare_query(self, X):
+        check_is_fitted(self, ["_psi", "_X_train", "_y_train"])
+        X = check_array(X, dtype=np.float64)
+        if X.shape[1] != self.n_features_in_:
+            raise ValueError(
+                f"X has {X.shape[1]} features, expected {self.n_features_in_}"
+            )
+        Xs = (X - self._x_mean) / self._x_std
+        return torch.tensor(Xs, dtype=torch.float64)
+
+    def predict(self, X):
+        X_t = self._prepare_query(X)
+        h = torch.nn.functional.softplus(self._psi)
+        y_hat, _, _ = forward(X_t, self._X_train, self._y_train, h)
+        return y_hat.detach().numpy() * self._y_std + self._y_mean
+
+    def predict_zone(self, X):
+        X_t = self._prepare_query(X)
+        h = torch.nn.functional.softplus(self._psi)
+        y_hat, delta, _ = forward(X_t, self._X_train, self._y_train, h)
+        return (
+            y_hat.detach().numpy() * self._y_std + self._y_mean,
+            delta.detach().numpy() * self._y_std,
+        )
+
+    def predict_interval(self, X, alpha=0.95):
+        from scipy.stats import norm
+        k = norm.ppf((1.0 + alpha) / 2.0)
+        y_hat, delta = self.predict_zone(X)
+        return y_hat - k * delta, y_hat + k * delta
+
+    def get_h(self):
+        check_is_fitted(self, ["_psi"])
+        return torch.nn.functional.softplus(self._psi).detach().numpy()
