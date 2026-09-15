@@ -20,7 +20,11 @@ def loo_huber_loss(h, X_train, y_train, forward_fn):
     y_hat, _, _ = forward_fn(X_train, X_train, y_train, h, True)
     return huber(y_train - y_hat).mean()
 
-def loo_mse_loss(h, X_train, y_train, forward_fn):
-    """Leave-one-out MSE loss (for classifier training)."""
-    y_hat, _, _ = forward_fn(X_train, X_train, y_train, h, True)
-    return ((y_train - y_hat) ** 2).mean()
+def loo_bce_loss(h, X_train, y_train, forward_fn, eps=1e-6):
+    """Leave-one-out BCE loss (for classifier training).
+
+    y_train in {0, 1}. p_hat from forward is clipped for numerical stability.
+    """
+    p_hat, _, _ = forward_fn(X_train, X_train, y_train, h, True)
+    p_hat = torch.clamp(p_hat, eps, 1.0 - eps)
+    return -(y_train * torch.log(p_hat) + (1 - y_train) * torch.log(1 - p_hat)).mean()

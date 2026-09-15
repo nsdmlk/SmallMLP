@@ -5,7 +5,7 @@ from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
 from sklearn.utils.multiclass import check_classification_targets
 
 from .core import forward
-from .loss import loo_mse_loss
+from .loss import loo_bce_loss
 
 
 class SmallMLPClassifier(BaseEstimator, ClassifierMixin):
@@ -74,7 +74,7 @@ class SmallMLPClassifier(BaseEstimator, ClassifierMixin):
             def closure():
                 optimizer.zero_grad()
                 h = self._h_from_psi(psi)
-                loss = loo_mse_loss(h, X_t, y_t, forward)
+                loss = loo_bce_loss(h, X_t, y_t, forward)
                 loss.backward()
                 return loss
 
