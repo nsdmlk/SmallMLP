@@ -14,9 +14,11 @@ class SmallMLPRegressor(BaseEstimator, RegressorMixin):
     predict() returns a point; predict_zone() returns (point, delta).
     """
 
-    def __init__(self, h_init=1.0, max_iter=200, tol=1e-6, verbose=False):
+    def __init__(self, h_init=1.0, max_iter=30, inner_iter=10,
+                 tol=1e-6, verbose=False):
         self.h_init = h_init
         self.max_iter = max_iter
+        self.inner_iter = inner_iter
         self.tol = tol
         self.verbose = verbose
 
@@ -48,7 +50,7 @@ class SmallMLPRegressor(BaseEstimator, RegressorMixin):
 
         optimizer = torch.optim.LBFGS(
             [psi],
-            max_iter=20,
+            max_iter=self.inner_iter,
             tolerance_grad=self.tol,
             tolerance_change=self.tol,
             line_search_fn="strong_wolfe",
@@ -90,17 +92,19 @@ class SmallMLPRegressor(BaseEstimator, RegressorMixin):
 
     def predict(self, X):
         X_t = self._prepare_query(X)
-        h = torch.nn.functional.softplus(self._psi)
-        y_hat, _, _ = forward(X_t, self._X_train, self._y_train, h)
-        return y_hat.detach().numpy() * self._y_std + self._y_mean
+        with torch.no_grad():
+            h = torch.nn.functional.softplus(self._psi)
+            y_hat, _, _ = forward(X_t, self._X_train, self._y_train, h)
+        return y_hat.numpy() * self._y_std + self._y_mean
 
     def predict_zone(self, X):
         X_t = self._prepare_query(X)
-        h = torch.nn.functional.softplus(self._psi)
-        y_hat, delta, _ = forward(X_t, self._X_train, self._y_train, h)
+        with torch.no_grad():
+            h = torch.nn.functional.softplus(self._psi)
+            y_hat, delta, _ = forward(X_t, self._X_train, self._y_train, h)
         return (
-            y_hat.detach().numpy() * self._y_std + self._y_mean,
-            delta.detach().numpy() * self._y_std,
+            y_hat.numpy() * self._y_std + self._y_mean,
+            delta.numpy() * self._y_std,
         )
 
     def predict_interval(self, X, alpha=0.95):

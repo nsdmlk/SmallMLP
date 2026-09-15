@@ -4,13 +4,27 @@ import torch
 def gaussian_weights(x_query, X_train, h):
     """Gaussian kernel weights with vector bandwidth.
 
+    Uses ||x - x_i||^2 = ||x||^2 - 2 x . x_i + ||x_i||^2
+    to avoid materializing the (m, n, d) diff tensor.
+
     x_query: (m, d) tensor
     X_train: (n, d) tensor
     h:       (d,) tensor, positive
     returns: (m, n) tensor
     """
-    diff = x_query[:, None, :] - X_train[None, :, :]      # (m, n, d)
-    dist2 = ((diff ** 2) / (h ** 2)[None, None, :]).sum(dim=-1)
+    # scaled coordinates: divide by h, then use the expansion
+    xq = x_query / h[None, :]                                  # (m, d)
+    xt = X_train / h[None, :]                                  # (n, d)
+
+    xq_sq = (xq ** 2).sum(dim=1, keepdim=True)                 # (m, 1)
+    xt_sq = (xt ** 2).sum(dim=1).unsqueeze(0)                  # (1, n)
+
+    # (m, n) = (m,1) + (1,n) - 2 * xq @ xt^T
+    dist2 = xq_sq + xt_sq - 2.0 * (xq @ xt.T)
+
+    # numerical clamp: dist2 can be slightly negative due to float error
+    dist2 = torch.clamp(dist2, min=0.0)
+
     return torch.exp(-0.5 * dist2)
 
 
