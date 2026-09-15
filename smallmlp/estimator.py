@@ -8,28 +8,23 @@ from .loss import loo_huber_loss
 
 
 class SmallMLPRegressor(BaseEstimator, RegressorMixin):
-    """Small-data regressor: weighted soft-median + data-dependent zone.
-
-    Non-parametric: the only learnable parameter is the bandwidth vector h.
-    predict() returns a point; predict_zone() returns (point, delta).
-    """
+    """Small-data regressor: learned-bandwidth Nadaraya-Watson + prediction zone."""
 
     def __init__(self, h_min=0.01, h_max=10.0, max_iter=30, inner_iter=10,
-                 tol=1e-6, verbose=False):
+                 tol=1e-6, verbose=False, alpha=1e-3):
         self.h_min = h_min
         self.h_max = h_max
         self.max_iter = max_iter
         self.inner_iter = inner_iter
         self.tol = tol
         self.verbose = verbose
+        self.alpha = alpha
 
     def _h_from_psi(self, psi):
-        """Bounded bandwidth: h = h_min + (h_max - h_min) * sigmoid(psi)."""
         return self.h_min + (self.h_max - self.h_min) * torch.sigmoid(psi)
 
     @staticmethod
     def _psi_from_h(h, h_min, h_max):
-        """Inverse of the bounded parametrization."""
         p = (h - h_min) / (h_max - h_min)
         p = np.clip(p, 1e-6, 1 - 1e-6)
         return np.log(p / (1 - p))
@@ -51,7 +46,6 @@ class SmallMLPRegressor(BaseEstimator, RegressorMixin):
         X_t = torch.tensor(Xs, dtype=torch.float64)
         y_t = torch.tensor(ys, dtype=torch.float64)
 
-        # init psi so that h = 1.0 (in standardized coords)
         psi0 = self._psi_from_h(1.0, self.h_min, self.h_max)
         psi = torch.nn.Parameter(
             torch.full((self.n_features_in_,), psi0, dtype=torch.float64)
@@ -104,14 +98,16 @@ class SmallMLPRegressor(BaseEstimator, RegressorMixin):
         X_t = self._prepare_query(X)
         with torch.no_grad():
             h = self._h_from_psi(self._psi)
-            y_hat, _, _ = forward(X_t, self._X_train, self._y_train, h)
+            y_hat, _, _ = forward(X_t, self._X_train, self._y_train, h,
+                                  alpha=self.alpha)
         return y_hat.numpy() * self._y_std + self._y_mean
 
     def predict_zone(self, X):
         X_t = self._prepare_query(X)
         with torch.no_grad():
             h = self._h_from_psi(self._psi)
-            y_hat, delta, _ = forward(X_t, self._X_train, self._y_train, h)
+            y_hat, delta, _ = forward(X_t, self._X_train, self._y_train, h,
+                                      alpha=self.alpha)
         return (
             y_hat.numpy() * self._y_std + self._y_mean,
             delta.numpy() * self._y_std,
