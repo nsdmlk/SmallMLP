@@ -5,10 +5,17 @@ from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
 
 from .core import forward
 from .loss import loo_huber_loss
+from .conformal import conformal_qhat, tune_h_cal, _to_tensor
 
 
 class SmallMLPRegressor(BaseEstimator, RegressorMixin):
-    """Small-data regressor: learned-bandwidth Nadaraya-Watson + prediction zone."""
+    """Small-data regressor: learned-bandwidth Nadaraya-Watson + prediction zone.
+
+    Two interval methods:
+      - predict_interval: heuristic Gaussian zone  [y_hat ± z * delta]
+      - predict_interval_conformal: weighted conformal with finite-sample
+        coverage guarantee
+    """
 
     def __init__(self, h_min=0.01, h_max=10.0, max_iter=30, inner_iter=10,
                  tol=1e-6, verbose=False, alpha=1e-3):
@@ -20,6 +27,8 @@ class SmallMLPRegressor(BaseEstimator, RegressorMixin):
         self.verbose = verbose
         self.alpha = alpha
 
+    # ---------------- bandwidth parametrization ----------------
+
     def _h_from_psi(self, psi):
         return self.h_min + (self.h_max - self.h_min) * torch.sigmoid(psi)
 
@@ -28,6 +37,8 @@ class SmallMLPRegressor(BaseEstimator, RegressorMixin):
         p = (h - h_min) / (h_max - h_min)
         p = np.clip(p, 1e-6, 1 - 1e-6)
         return np.log(p / (1 - p))
+
+    # ---------------- fit (point predictor) ----------------
 
     def fit(self, X, y):
         X, y = check_X_y(X, y, dtype=np.float64)
@@ -84,6 +95,8 @@ class SmallMLPRegressor(BaseEstimator, RegressorMixin):
         self._loss_ = prev_loss
         return self
 
+    # ---------------- point prediction ----------------
+
     def _prepare_query(self, X):
         check_is_fitted(self, ["_psi", "_X_train", "_y_train"])
         X = check_array(X, dtype=np.float64)
@@ -102,6 +115,8 @@ class SmallMLPRegressor(BaseEstimator, RegressorMixin):
                                   alpha=self.alpha)
         return y_hat.numpy() * self._y_std + self._y_mean
 
+    # ---------------- heuristic zone ----------------
+
     def predict_zone(self, X):
         X_t = self._prepare_query(X)
         with torch.no_grad():
@@ -119,6 +134,68 @@ class SmallMLPRegressor(BaseEstimator, RegressorMixin):
         y_hat, delta = self.predict_zone(X)
         return y_hat - k * delta, y_hat + k * delta
 
+    # ---------------- weighted conformal ----------------
+
+    def fit_conformal(self, X_cal, y_cal, X_val, y_val,
+                      alpha=0.05, h_grid=None, lambda_penalty=10.0,
+                      verbose=False):
+        """Tune h_cal on validation, store calibration residuals.
+
+        Call after fit(). X_cal/X_val must be disjoint from training data.
+        """
+        check_is_fitted(self, ["_psi", "_X_train", "_y_train"])
+
+        best = tune_h_cal(
+            self, X_cal, y_cal, X_cal, y_cal, X_val, y_val,
+            alpha=alpha, h_grid=h_grid, lambda_penalty=lambda_penalty,
+        )
+        self._h_cal = np.full(self.n_features_in_, best["h_cal"])
+        self._alpha_conformal = alpha
+
+        # calibration residuals in ORIGINAL y units
+        y_cal_hat = self.predict(X_cal)
+        self._residuals_cal = np.abs(y_cal - y_cal_hat)
+        self._X_cal_raw = np.asarray(X_cal, dtype=np.float64)
+
+        if verbose:
+            print(f"[conformal] h_cal={best['h_cal']:.4f}  "
+                  f"val_cov={best['coverage']:.4f}  "
+                  f"val_width={best['width']:.4f}")
+
+        return self
+
+    def predict_interval_conformal(self, X, alpha=None):
+        """Weighted conformal interval using stored calibration residuals.
+
+        Returns (lower, upper) in original y units.
+        """
+        check_is_fitted(
+            self, ["_h_cal", "_residuals_cal", "_X_cal_raw"]
+        )
+        if alpha is None:
+            alpha = self._alpha_conformal
+
+        X = check_array(X, dtype=np.float64)
+        X_t = _to_tensor(self, X)
+        X_cal_t = _to_tensor(self, self._X_cal_raw)
+
+        residuals_t = torch.tensor(
+            self._residuals_cal, dtype=torch.float64
+        )
+        h_cal_t = torch.tensor(self._h_cal, dtype=torch.float64)
+
+        q_hat = conformal_qhat(
+            X_t, X_cal_t, residuals_t, h_cal_t, alpha
+        )
+        y_hat = self.predict(X)
+        return y_hat - q_hat, y_hat + q_hat
+
+    # ---------------- diagnostics ----------------
+
     def get_h(self):
         check_is_fitted(self, ["_psi"])
         return self._h_from_psi(self._psi).numpy()
+
+    def get_h_cal(self):
+        check_is_fitted(self, ["_h_cal"])
+        return self._h_cal.copy()
