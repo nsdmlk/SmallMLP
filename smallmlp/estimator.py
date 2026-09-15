@@ -14,17 +14,25 @@ class SmallMLPRegressor(BaseEstimator, RegressorMixin):
     predict() returns a point; predict_zone() returns (point, delta).
     """
 
-    def __init__(self, h_init=1.0, max_iter=30, inner_iter=10,
+    def __init__(self, h_min=0.01, h_max=10.0, max_iter=30, inner_iter=10,
                  tol=1e-6, verbose=False):
-        self.h_init = h_init
+        self.h_min = h_min
+        self.h_max = h_max
         self.max_iter = max_iter
         self.inner_iter = inner_iter
         self.tol = tol
         self.verbose = verbose
 
+    def _h_from_psi(self, psi):
+        """Bounded bandwidth: h = h_min + (h_max - h_min) * sigmoid(psi)."""
+        return self.h_min + (self.h_max - self.h_min) * torch.sigmoid(psi)
+
     @staticmethod
-    def _softplus_inv(x):
-        return np.log(np.expm1(x))
+    def _psi_from_h(h, h_min, h_max):
+        """Inverse of the bounded parametrization."""
+        p = (h - h_min) / (h_max - h_min)
+        p = np.clip(p, 1e-6, 1 - 1e-6)
+        return np.log(p / (1 - p))
 
     def fit(self, X, y):
         X, y = check_X_y(X, y, dtype=np.float64)
@@ -43,7 +51,8 @@ class SmallMLPRegressor(BaseEstimator, RegressorMixin):
         X_t = torch.tensor(Xs, dtype=torch.float64)
         y_t = torch.tensor(ys, dtype=torch.float64)
 
-        psi0 = self._softplus_inv(self.h_init)
+        # init psi so that h = 1.0 (in standardized coords)
+        psi0 = self._psi_from_h(1.0, self.h_min, self.h_max)
         psi = torch.nn.Parameter(
             torch.full((self.n_features_in_,), psi0, dtype=torch.float64)
         )
@@ -60,7 +69,8 @@ class SmallMLPRegressor(BaseEstimator, RegressorMixin):
         for it in range(self.max_iter):
             def closure():
                 optimizer.zero_grad()
-                loss = loo_huber_loss(psi, X_t, y_t, forward)
+                h = self._h_from_psi(psi)
+                loss = loo_huber_loss(h, X_t, y_t, forward)
                 loss.backward()
                 return loss
 
@@ -93,14 +103,14 @@ class SmallMLPRegressor(BaseEstimator, RegressorMixin):
     def predict(self, X):
         X_t = self._prepare_query(X)
         with torch.no_grad():
-            h = torch.nn.functional.softplus(self._psi)
+            h = self._h_from_psi(self._psi)
             y_hat, _, _ = forward(X_t, self._X_train, self._y_train, h)
         return y_hat.numpy() * self._y_std + self._y_mean
 
     def predict_zone(self, X):
         X_t = self._prepare_query(X)
         with torch.no_grad():
-            h = torch.nn.functional.softplus(self._psi)
+            h = self._h_from_psi(self._psi)
             y_hat, delta, _ = forward(X_t, self._X_train, self._y_train, h)
         return (
             y_hat.numpy() * self._y_std + self._y_mean,
@@ -115,4 +125,4 @@ class SmallMLPRegressor(BaseEstimator, RegressorMixin):
 
     def get_h(self):
         check_is_fitted(self, ["_psi"])
-        return torch.nn.functional.softplus(self._psi).detach().numpy()
+        return self._h_from_psi(self._psi).numpy()
