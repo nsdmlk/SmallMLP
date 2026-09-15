@@ -5,8 +5,6 @@
 [![PyPI version](https://img.shields.io/badge/pypi-v0.1.0-blue.svg)](https://pypi.org/project/smallmlp/)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests](https://img.shields.io/badge/tests-3%20passed-brightgreen.svg)](#testing)
-[![arXiv](https://img.shields.io/badge/arXiv-coming%20soon-red.svg)](#citation)
 
 **SmallMLP** is a non-parametric regressor designed for **small, nonlinear datasets** (n < 500). It learns a per-feature kernel bandwidth via leave-one-out optimization and produces **calibrated prediction intervals** through weighted conformal prediction. On 45 benchmark datasets it outperforms standard MLPs without any hyperparameter tuning, and produces intervals **19% narrower** than split conformal at equal coverage.
 
