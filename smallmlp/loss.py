@@ -19,3 +19,8 @@ def loo_huber_loss(h, X_train, y_train, forward_fn):
     """
     y_hat, _, _ = forward_fn(X_train, X_train, y_train, h, True)
     return huber(y_train - y_hat).mean()
+
+def loo_mse_loss(h, X_train, y_train, forward_fn):
+    """Leave-one-out MSE loss (for classifier training)."""
+    y_hat, _, _ = forward_fn(X_train, X_train, y_train, h, True)
+    return ((y_train - y_hat) ** 2).mean()
