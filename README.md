@@ -2,12 +2,12 @@
 
 > Non-parametric regression and classification for small nonlinear data, with calibrated prediction intervals.
 
-[![PyPI version](https://img.shields.io/badge/pypi-v0.1.0-blue.svg)](https://pypi.org/project/smallmlp/)
+[![PyPI version](https://img.shields.io/badge/pypi-v0.2.0-blue.svg)](https://pypi.org/project/smallmlp/)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests](https://img.shields.io/badge/tests-3%20passed-brightgreen.svg)](#testing)
-[![arXiv](https://img.shields.io/badge/arXiv-coming%20soon-red.svg)](#citation)
-<br>
+[![Tests](<https://img.shields.io/badge/tests-3%20passed-brightgreen.svg>)](#testing)
+[![arXiv](<https://img.shields.io/badge/arXiv-coming%20soon-red.svg>)](#citation)
+
 **SmallMLP** is a non-parametric library for **small, nonlinear datasets** ($n < 500$). It learns a per-feature kernel bandwidth via leave-one-out optimization and produces **calibrated prediction intervals** through weighted conformal prediction.
 
 - **Regression:** 25 / 45 wins against standard MLPs, no hyperparameter tuning.
@@ -121,24 +121,24 @@ Given calibration residuals $R_j$ (regression) or scores $s_j = 1 - \hat{p}_{y_j
 
 45 small regression datasets (n < 500), 5-fold CV, mean absolute error.
 
-| Model              | Mean rank ↓ | Mean MAE ↓ | Wins / 45 |
-| ------------------ | ----------- | ---------- | --------- |
-| **SmallMLP**       | **1.80**    | **11.39**  | **25**    |
-| MLP (256, 128)     | 2.76        | 12.44      | 11        |
-| KNN (k=10)         | 3.36        | 19.13      | 5         |
-| KNN (k=5)          | 3.49        | 18.89      | 2         |
-| MLP (100,)         | 4.33        | 34.44      | 0         |
-| MLP (32,)          | 5.27        | 51.95      | 0         |
+| Model              | Mean rank ↓   | Mean MAE ↓     | Wins / 45    |
+| ------------------ | -------------- | --------------- | ------------ |
+| **SmallMLP** | **1.80** | **11.39** | **25** |
+| MLP (256, 128)     | 2.76           | 12.44           | 11           |
+| KNN (k=10)         | 3.36           | 19.13           | 5            |
+| KNN (k=5)          | 3.49           | 18.89           | 2            |
+| MLP (100,)         | 4.33           | 34.44           | 0            |
+| MLP (32,)          | 5.27           | 51.95           | 0            |
 
 ### Regression — prediction intervals
 
 45 datasets, $\alpha = 0.1$ (target coverage ≥ 0.90), 60/20/20 split.
 
-| Method                             | Valid (cov ≥ 0.88) | Mean width among valid ↓ |
-| ---------------------------------- | ------------------ | ------------------------ |
-| **Weighted conformal (SmallMLP)**  | **38 / 45**        | **51.8**                 |
-| Split conformal                    | 32 / 45            | 64.0                     |
-| Heuristic zone                     | 17 / 45            | 145.7                    |
+| Method                                  | Valid (cov ≥ 0.88) | Mean width among valid ↓ |
+| --------------------------------------- | ------------------- | ------------------------- |
+| **Weighted conformal (SmallMLP)** | **38 / 45**   | **51.8**            |
+| Split conformal                         | 32 / 45             | 64.0                      |
+| Heuristic zone                          | 17 / 45             | 145.7                     |
 
 Among 32 datasets where both weighted and split conformal are valid, **weighted conformal produces narrower intervals on 31** (mean width ratio 0.81).
 
@@ -146,25 +146,25 @@ Among 32 datasets where both weighted and split conformal are valid, **weighted 
 
 12 synthetic nonlinear datasets (moons, circles, XOR, spirals; n ∈ {100, 200, 400}), 5-fold CV, AUC.
 
-| Model               | Mean AUC ↑ | Mean rank ↓ | Wins / 12 |
-| ------------------- | ---------- | ----------- | --------- |
-| **SmallMLP (nw)**   | **0.937**  | **2.79**    | **5**     |
-| MLP (100,)          | 0.932      | 3.42        | 0         |
-| KNN (k=5)           | 0.927      | 4.75        | 2         |
-| RF (100)            | 0.924      | 5.08        | 0         |
-| MLP (32,)           | 0.903      | 3.75        | 3         |
-| SmallMLP (klr)      | 0.863      | 4.67        | 2         |
-| LogReg              | 0.641      | 7.50        | 0         |
+| Model                   | Mean AUC ↑     | Mean rank ↓   | Wins / 12   |
+| ----------------------- | --------------- | -------------- | ----------- |
+| **SmallMLP (nw)** | **0.937** | **2.79** | **5** |
+| MLP (100,)              | 0.932           | 3.42           | 0           |
+| KNN (k=5)               | 0.927           | 4.75           | 2           |
+| RF (100)                | 0.924           | 5.08           | 0           |
+| MLP (32,)               | 0.903           | 3.75           | 3           |
+| SmallMLP (klr)          | 0.863           | 4.67           | 2           |
+| LogReg                  | 0.641           | 7.50           | 0           |
 
 ### Ablation — learned bandwidth matters
 
-| Variant              | Mean rank ↓ | Wins / 18 |
-| -------------------- | ----------- | --------- |
-| **Learned h**        | **1.44**    | **13**    |
-| Fixed h = 1.0        | 2.50        | 4         |
-| Fixed h = 0.5        | 3.39        | 0         |
-| Fixed h = 2.0        | 3.17        | 1         |
-| Fixed h = 5.0        | 4.50        | 0         |
+| Variant             | Mean rank ↓   | Wins / 18    |
+| ------------------- | -------------- | ------------ |
+| **Learned h** | **1.44** | **13** |
+| Fixed h = 1.0       | 2.50           | 4            |
+| Fixed h = 0.5       | 3.39           | 0            |
+| Fixed h = 2.0       | 3.17           | 1            |
+| Fixed h = 5.0       | 4.50           | 0            |
 
 Learning the bandwidth is the core mechanism — fixed bandwidth loses most of the advantage.
 

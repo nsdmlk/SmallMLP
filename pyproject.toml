@@ -4,15 +4,23 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "smallmlp"
-version = "0.1.0"
-description = "Non-parametric MLP for small tabular data: weighted soft-median with data-dependent prediction zones."
+version = "0.2.0"
+description = "Non-parametric regression and classification for small nonlinear data, with calibrated prediction intervals."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
     { name = "Emelyanov Ilya" }
 ]
-keywords = ["machine-learning", "small-data", "tabular", "non-parametric", "uncertainty"]
+keywords = [
+    "machine-learning",
+    "small-data",
+    "tabular",
+    "non-parametric",
+    "uncertainty",
+    "conformal-prediction",
+    "kernel-methods",
+]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
