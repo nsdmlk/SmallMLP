@@ -92,7 +92,7 @@ print(f"Coverage: {coverage:.3f}  Avg set size: {avg_size:.3f}")
 
 ---
 
-## Method
+## Method 
 
 SmallMLP combines two ideas.
 

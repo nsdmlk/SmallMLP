@@ -1,4 +1,4 @@
-from .estimator import SmallMLPRegressor
-from .classifier import SmallMLPClassifier
+from .nn.regressor import SmallMLPRegressor
+from .nn.classifier import SmallMLPClassifier
 
 __all__ = ["SmallMLPRegressor", "SmallMLPClassifier"]
