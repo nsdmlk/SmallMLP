@@ -5,17 +5,13 @@ from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
 from sklearn.preprocessing import StandardScaler
 
-from .backbone import _Backbone, adaptive_width, adaptive_dropout
+from .backbone import _Backbone, adaptive_dropout
 from ..conformal import conformal_qhat, _get_embedding
 from ..conformal.weighted import tune_h_cal_regression
 
 
 class SmallMLPRegressor(BaseEstimator, RegressorMixin):
-    """Adaptive MLP for small regression with weighted conformal intervals.
-
-    Width and dropout adapt to n and d. Trained with Adam + early stopping.
-    Point: y_hat. Intervals: weighted conformal with finite-sample coverage.
-    """
+    """Adaptive MLP for small regression with weighted conformal intervals."""
 
     def __init__(self, activation="relu", lr=1e-3, weight_decay=None,
                  max_epochs=500, patience=30, batch_size=None,
@@ -29,8 +25,6 @@ class SmallMLPRegressor(BaseEstimator, RegressorMixin):
         self.val_frac = val_frac
         self.random_state = random_state
         self.verbose = verbose
-
-    # ---------------- fit ----------------
 
     def fit(self, X, y):
         X, y = check_X_y(X, y, dtype=np.float64)
@@ -47,13 +41,12 @@ class SmallMLPRegressor(BaseEstimator, RegressorMixin):
         self._y_std = y_std
         ys = (y - self._y_mean) / self._y_std
 
-        width = adaptive_width(n, self.n_features_in_)
         dropout = adaptive_dropout(n, self.n_features_in_)
         wd = self.weight_decay if self.weight_decay is not None else 1.0 / n
 
         if self.verbose:
             print(f"[SmallMLPRegressor] n={n} d={self.n_features_in_} "
-                  f"width={width} dropout={dropout:.3f} wd={wd:.4f}")
+                  f"dropout={dropout:.3f} wd={wd:.4f}")
 
         rng = np.random.default_rng(self.random_state)
         idx = rng.permutation(n)
@@ -67,9 +60,16 @@ class SmallMLPRegressor(BaseEstimator, RegressorMixin):
         y_val = torch.tensor(ys[val_idx], dtype=torch.float32)
 
         self._model = _Backbone(
-            self.n_features_in_, width, dropout, self.activation
+            self.n_features_in_, n, K=2,
+            dropout=dropout, activation=self.activation,
+            width_mode="classic",
         )
-        self._head = nn.Linear(width, 1)
+        out_dim = self._model.output_dim
+
+        if self.verbose:
+            print(f"  widths={self._model.widths}")
+
+        self._head = nn.Linear(out_dim, 1)
         params = list(self._model.parameters()) + list(self._head.parameters())
 
         optimizer = torch.optim.Adam(params, lr=self.lr, weight_decay=wd)
@@ -123,8 +123,6 @@ class SmallMLPRegressor(BaseEstimator, RegressorMixin):
         self._loss_ = best_val
         return self
 
-    # ---------------- predict ----------------
-
     def _prepare_query(self, X):
         check_is_fitted(self, ["_model", "_head"])
         X = check_array(X, dtype=np.float64)
@@ -138,11 +136,8 @@ class SmallMLPRegressor(BaseEstimator, RegressorMixin):
             pred = self._head(h).squeeze(-1).numpy()
         return pred * self._y_std + self._y_mean
 
-    # ---------------- weighted conformal ----------------
-
     def fit_conformal(self, X_cal, y_cal, X_val, y_val,
                       alpha=0.1, h_grid=None, verbose=False):
-        """Tune h_cal on validation; store calibration residuals."""
         check_is_fitted(self, ["_model", "_head"])
 
         best = tune_h_cal_regression(
@@ -165,7 +160,6 @@ class SmallMLPRegressor(BaseEstimator, RegressorMixin):
         return self
 
     def predict_interval_conformal(self, X, alpha=None):
-        """Weighted conformal interval with finite-sample coverage guarantee."""
         check_is_fitted(self, ["_scores_cal"])
         if alpha is None:
             alpha = self._alpha_conformal
@@ -184,5 +178,4 @@ class SmallMLPRegressor(BaseEstimator, RegressorMixin):
         return y_hat - q_hat, y_hat + q_hat
 
     def predict_zone(self, X):
-        """Point prediction only (kept for API compatibility)."""
         return self.predict(X)

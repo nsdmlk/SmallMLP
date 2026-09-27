@@ -6,7 +6,7 @@ from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
 from sklearn.utils.multiclass import check_classification_targets
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 
-from .backbone import _Backbone, adaptive_width, adaptive_dropout
+from .backbone import _Backbone, adaptive_dropout
 from ..conformal import conformal_qhat, _get_embedding
 from ..conformal.weighted import tune_h_cal_classification
 
@@ -15,9 +15,9 @@ class SmallMLPClassifier(BaseEstimator, ClassifierMixin):
     """Adaptive MLP for small classification (binary or multiclass) with
     weighted conformal prediction sets.
 
-    Fixes over v1:
-    - width scales with number of classes (H1)
-    - class weights applied only if imbalance ratio > 2:1 (H2)
+    Layer width is computed from dataset parameters:
+        w_l = max(K, min(floor(sqrt(K) * log2(n) * d / l), w_max))
+        w_max = min(4n, max(256, 32K))
     """
 
     def __init__(self, activation="relu", lr=1e-3, weight_decay=None,
@@ -59,16 +59,8 @@ class SmallMLPClassifier(BaseEstimator, ClassifierMixin):
         self._x_scaler = StandardScaler().fit(X)
         Xs = self._x_scaler.transform(X)
 
-        # H1: width scales with K
-        base_width = adaptive_width(n, self.n_features_in_)
-        width = int(min(max(base_width, 32 * self.n_classes_), 256))
         dropout = adaptive_dropout(n, self.n_features_in_)
         wd = self.weight_decay if self.weight_decay is not None else 1.0 / n
-
-        if self.verbose:
-            print(f"[SmallMLPClassifier] n={n} d={self.n_features_in_} "
-                  f"K={self.n_classes_} width={width} dropout={dropout:.3f} "
-                  f"wd={wd:.4f} class_weight={self.class_weight}")
 
         rng = np.random.default_rng(self.random_state)
         idx = rng.permutation(n)
@@ -82,14 +74,21 @@ class SmallMLPClassifier(BaseEstimator, ClassifierMixin):
         y_val = torch.tensor(y_enc[val_idx], dtype=torch.long)
 
         self._model = _Backbone(
-            self.n_features_in_, width, dropout, self.activation
+            self.n_features_in_, n, K=self.n_classes_,
+            dropout=dropout, activation=self.activation,
         )
-        self._head = nn.Linear(width, self.n_classes_)
+        out_dim = self._model.output_dim
+
+        if self.verbose:
+            print(f"[SmallMLPClassifier] n={n} d={self.n_features_in_} "
+                  f"K={self.n_classes_} dropout={dropout:.3f} wd={wd:.4f}")
+            print(f"  widths={self._model.widths}")
+
+        self._head = nn.Linear(out_dim, self.n_classes_)
         params = list(self._model.parameters()) + list(self._head.parameters())
 
         optimizer = torch.optim.Adam(params, lr=self.lr, weight_decay=wd)
 
-        # H2: class weights only if imbalance ratio > 2:1
         if self.class_weight == "balanced":
             counts = np.bincount(y_enc, minlength=self.n_classes_).astype(np.float64)
             counts = np.maximum(counts, 1.0)
@@ -97,12 +96,8 @@ class SmallMLPClassifier(BaseEstimator, ClassifierMixin):
             if ratio > 2.0:
                 weights = n / (self.n_classes_ * counts)
                 class_weights = torch.tensor(weights, dtype=torch.float32)
-                if self.verbose:
-                    print(f"  class weights applied (imbalance ratio {ratio:.2f})")
             else:
                 class_weights = None
-                if self.verbose:
-                    print(f"  class weights skipped (imbalance ratio {ratio:.2f} ≤ 2)")
         else:
             class_weights = None
 
@@ -132,9 +127,6 @@ class SmallMLPClassifier(BaseEstimator, ClassifierMixin):
                 h_val = self._model(X_val)
                 val_logits = self._head(h_val)
                 val_loss = loss_fn(val_logits, y_val).item()
-
-            if self.verbose and epoch % 100 == 0:
-                print(f"  epoch {epoch:4d}  val_loss={val_loss:.5f}")
 
             if val_loss < best_val - 1e-6:
                 best_val = val_loss
@@ -209,7 +201,6 @@ class SmallMLPClassifier(BaseEstimator, ClassifierMixin):
         return self
 
     def predict_set(self, X, alpha=None):
-        """Weighted conformal prediction sets (encoded class indices)."""
         check_is_fitted(self, ["_scores_cal"])
         if alpha is None:
             alpha = self._alpha_conformal

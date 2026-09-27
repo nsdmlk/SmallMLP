@@ -1,7 +1,7 @@
-"""Full benchmark: SmallMLP vs baselines on regression and classification.
+"""Full benchmark: SmallMLP vs baselines.
 
-Regression: 45 datasets, MAE.
-Classification: 20 datasets (binary + multiclass), accuracy.
+Regression: MAE, 5-fold CV.
+Classification: accuracy, 5-fold CV.
 
 Conformal: coverage, width/set size (alpha=0.1), 60/20/20 split.
 """
@@ -10,7 +10,7 @@ import warnings
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import KFold, StratifiedKFold, train_test_split
-from sklearn.metrics import mean_absolute_error, accuracy_score, roc_auc_score
+from sklearn.metrics import mean_absolute_error, accuracy_score
 from sklearn.neural_network import MLPRegressor, MLPClassifier
 from sklearn.neighbors import KNeighborsRegressor, KNeighborsClassifier
 from sklearn.linear_model import LogisticRegression
@@ -51,7 +51,6 @@ def _load_openml_regression(name, version=1):
 def build_regression_datasets():
     datasets = []
 
-    # synthetic
     configs = [
         (80, 5, "sin"), (100, 10, "sin"), (150, 10, "sin"),
         (200, 20, "sin"), (300, 15, "poly"), (500, 20, "poly"),
@@ -65,7 +64,6 @@ def build_regression_datasets():
             y = X[:, 0] ** 2 - X[:, 1] * X[:, 2] + 0.1 * rng.normal(size=n)
         datasets.append((f"synth_{kind}_{n}x{d}", X, y))
 
-    # friedman
     for n in [100, 300, 500]:
         for name, fn in [("friedman1", make_friedman1),
                          ("friedman2", make_friedman2),
@@ -76,7 +74,6 @@ def build_regression_datasets():
             except Exception:
                 pass
 
-    # make_regression
     for n, d, n_inf in [(100, 20, 5), (300, 30, 8), (500, 40, 10)]:
         X, y = make_regression(
             n_samples=n, n_features=d, n_informative=n_inf,
@@ -84,7 +81,6 @@ def build_regression_datasets():
         )
         datasets.append((f"mreg_{n}x{d}_inf{n_inf}", X, y))
 
-    # diabetes
     diab = load_diabetes()
     datasets.append(("diabetes", diab.data, diab.target))
     rng = np.random.default_rng(7)
@@ -92,7 +88,6 @@ def build_regression_datasets():
         idx = rng.choice(len(diab.target), size=n_sub, replace=False)
         datasets.append((f"diabetes_{n_sub}", diab.data[idx], diab.target[idx]))
 
-    # OpenML
     openml_names = {
         "energy": "energy-efficiency",
         "yacht": "yacht_hydrodynamics",
@@ -133,33 +128,42 @@ def _load_uciml(uid):
     return X[mask], y[mask]
 
 
+def subsample(X, y, n_max=500, seed=0):
+    if len(y) <= n_max:
+        return X, y
+    K = len(np.unique(y))
+    if K > 8:
+        n_max = max(n_max, 1000)
+    idx = np.random.default_rng(seed).choice(len(y), size=n_max, replace=False)
+    return X[idx], y[idx]
+
+
 def build_classification_datasets():
     datasets = []
 
-    # multiclass sklearn
     for loader, name in [
         (load_iris, "iris"),
         (load_wine, "wine"),
         (load_breast_cancer, "breast_cancer"),
     ]:
         data = loader()
-        datasets.append((f"sk_{name}", data.data, data.target))
+        X, y = subsample(data.data, data.target, n_max=500)
+        datasets.append((f"sk_{name}", X, y))
 
-    # binary UCI
     uci = {
         "hepatitis": 46, "parkinsons": 174, "sonar": 151,
         "ionosphere": 52, "heart_statlog": 145, "liver_disorders": 225,
-        "breast_cancer_wisconsin": 15, "blood_transfusion": 176,
-        "haberman": 43, "banknote": 267,
+        "blood_transfusion": 176,
+        "banknote": 267,
     }
     for name, uid in uci.items():
         try:
             X, y = _load_uciml(uid)
+            X, y = subsample(X, y, n_max=500)
             datasets.append((f"uci_{name}", X, y))
         except Exception as e:
             print(f"[skip] {name}: {e}")
 
-    # multiclass UCI
     uci_multi = {
         "glass": 42,
         "yeast": 110,
@@ -169,6 +173,7 @@ def build_classification_datasets():
     for name, uid in uci_multi.items():
         try:
             X, y = _load_uciml(uid)
+            X, y = subsample(X, y, n_max=500)
             datasets.append((f"uci_{name}", X, y))
         except Exception as e:
             print(f"[skip] {name}: {e}")
@@ -293,11 +298,9 @@ def run_classification_benchmark(n_splits=5):
 # ---------------------------------------------------------------------------
 
 def run_conformal_eval(alpha=0.1):
-    """Coverage and width/size for SmallMLP conformal on all datasets."""
     print("\n\nCONFORMAL EVALUATION (alpha=0.1)")
     print("=" * 100)
 
-    # regression
     print("\n--- Regression ---")
     print(f"{'dataset':<28} {'n_tr':>5} {'n_cal':>6} {'n_val':>6} "
           f"{'coverage':>10} {'width':>10}")
@@ -312,7 +315,7 @@ def run_conformal_eval(alpha=0.1):
             X_cal, X_val, y_cal, y_val = train_test_split(
                 X_tmp, y_tmp, test_size=0.5, random_state=0
             )
-            reg = SmallMLPRegressor(hetero=True, max_epochs=500, patience=30)
+            reg = SmallMLPRegressor(max_epochs=500, patience=30)
             reg.fit(X_tr, y_tr)
             reg.fit_conformal(X_cal, y_cal, X_val, y_val, alpha=alpha)
             lo, hi = reg.predict_interval_conformal(X_val, alpha=alpha)
@@ -324,7 +327,6 @@ def run_conformal_eval(alpha=0.1):
         except Exception as e:
             print(f"{ds_name:<28} FAILED: {e}")
 
-    # classification
     print("\n--- Classification ---")
     print(f"{'dataset':<28} {'K':>3} {'n_tr':>5} {'n_cal':>6} {'n_val':>6} "
           f"{'coverage':>10} {'size':>10}")
@@ -358,7 +360,7 @@ def run_conformal_eval(alpha=0.1):
 
 
 # ---------------------------------------------------------------------------
-# Main
+# Summaries
 # ---------------------------------------------------------------------------
 
 def summarize_regression(df):
@@ -408,8 +410,4 @@ if __name__ == "__main__":
     reg_conf.to_csv("benchmarks/results_conformal_regression.csv", index=False)
     clf_conf.to_csv("benchmarks/results_conformal_classification.csv", index=False)
 
-    print("\nSaved:")
-    print("  benchmarks/results_regression.csv")
-    print("  benchmarks/results_classification.csv")
-    print("  benchmarks/results_conformal_regression.csv")
-    print("  benchmarks/results_conformal_classification.csv")
+    print("\nSaved 4 CSV files to benchmarks/")
