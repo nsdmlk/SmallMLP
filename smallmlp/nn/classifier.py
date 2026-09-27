@@ -15,15 +15,16 @@ class SmallMLPClassifier(BaseEstimator, ClassifierMixin):
     """Adaptive MLP for small classification (binary or multiclass) with
     weighted conformal prediction sets.
 
-    Layer width is computed from dataset parameters:
-        w_l = max(K, min(floor(sqrt(K) * log2(n) * d / l), w_max))
-        w_max = min(4n, max(256, 32K))
+    width_mode:
+      'formula'  — w_l = max(K, min(floor(sqrt(K) * log2(n) * d / l), w_max))
+                   w_max = min(4n, max(256, 32K))
+      'classic'  — min(2n, 128) for all layers
     """
 
     def __init__(self, activation="relu", lr=1e-3, weight_decay=None,
                  max_epochs=500, patience=30, batch_size=None,
                  val_frac=0.2, class_weight=None, random_state=42,
-                 verbose=False):
+                 verbose=False, width_mode="formula"):
         self.activation = activation
         self.lr = lr
         self.weight_decay = weight_decay
@@ -34,8 +35,7 @@ class SmallMLPClassifier(BaseEstimator, ClassifierMixin):
         self.class_weight = class_weight
         self.random_state = random_state
         self.verbose = verbose
-
-    # ---------------- fit ----------------
+        self.width_mode = width_mode
 
     def fit(self, X, y):
         X, y = check_X_y(X, y)
@@ -76,12 +76,14 @@ class SmallMLPClassifier(BaseEstimator, ClassifierMixin):
         self._model = _Backbone(
             self.n_features_in_, n, K=self.n_classes_,
             dropout=dropout, activation=self.activation,
+            width_mode=self.width_mode,
         )
         out_dim = self._model.output_dim
 
         if self.verbose:
             print(f"[SmallMLPClassifier] n={n} d={self.n_features_in_} "
-                  f"K={self.n_classes_} dropout={dropout:.3f} wd={wd:.4f}")
+                  f"K={self.n_classes_} width_mode={self.width_mode} "
+                  f"dropout={dropout:.3f} wd={wd:.4f}")
             print(f"  widths={self._model.widths}")
 
         self._head = nn.Linear(out_dim, self.n_classes_)
@@ -150,8 +152,6 @@ class SmallMLPClassifier(BaseEstimator, ClassifierMixin):
         self._head.eval()
         self._loss_ = best_val
         return self
-
-    # ---------------- predict ----------------
 
     def _prepare_query(self, X):
         check_is_fitted(self, ["_model", "_head"])
