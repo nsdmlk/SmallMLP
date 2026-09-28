@@ -16,8 +16,11 @@ class SmallMLPClassifier(BaseEstimator, ClassifierMixin):
     weighted conformal prediction sets.
 
     width_mode:
-      'formula'  — w_l = max(K, min(floor(sqrt(K) * log2(n) * d / l), w_max))
-                   w_max = min(4n, max(256, 32K))
+      'formula'  — w_l = max(K_lower, min(floor(c * sqrt(K) * log2(n/K + 1)
+                       * sqrt(d_eff) / sqrt(l)), w_max))
+                   K_lower = 2K if K > 2 else K
+                   w_max   = min(4n, max(256, 32K))
+                   d_eff   = PCA components for 95% variance (computed in fit)
       'classic'  — min(2n, 128) for all layers
     """
 
@@ -77,6 +80,7 @@ class SmallMLPClassifier(BaseEstimator, ClassifierMixin):
             self.n_features_in_, n, K=self.n_classes_,
             dropout=dropout, activation=self.activation,
             width_mode=self.width_mode,
+            X_for_d_eff=Xs[tr_idx] if self.width_mode == "formula" else None,
         )
         out_dim = self._model.output_dim
 

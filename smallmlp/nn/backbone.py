@@ -4,14 +4,35 @@ import torch.nn as nn
 
 
 def adaptive_width(n, d, K=2, l=1):
-    """Formula-based width for classification.
+    """Formula-based width for classification (v3, multiclass-aware).
 
-    w_l = max(K, min(floor(sqrt(K) * log2(n) * d / l), w_max))
+    Binary (K=2):
+      w_l = max(K, min(floor(sqrt(K) * log2(n) * d / l), w_max))
+
+    Multiclass (K>2):
+      w_l = max(2K, min(floor(sqrt(K) * log2(n/K + 1)
+                            * sqrt(d) / sqrt(l)), w_max))
+
     where w_max = min(4n, max(256, 32K)).
+
+    Rationale: multiclass needs >= 2 units/class and capacity that scales
+    with per-class sample count (n/K), not total n. sqrt(d)/sqrt(l) softens
+    the depth decay, giving later layers more capacity for class boundaries.
     """
     w_max = min(4 * n, max(256, 32 * K))
-    raw = np.sqrt(K) * np.log2(max(n, 2)) * (d / max(l, 1))
-    return int(max(K, min(np.floor(raw), w_max)))
+
+    if K <= 2:
+        raw = np.sqrt(K) * np.log2(max(n, 2)) * (d / max(l, 1))
+        return int(max(K, min(np.floor(raw), w_max)))
+
+    K_lower = 2 * K
+    n_per_class = max(n / K, 1.0)
+    raw = (
+        np.sqrt(K)
+        * np.log2(n_per_class + 1.0)
+        * (np.sqrt(d) / np.sqrt(max(l, 1)))
+    )
+    return int(max(K_lower, min(np.floor(raw), w_max)))
 
 
 def classic_width(n):
@@ -19,8 +40,15 @@ def classic_width(n):
     return int(min(max(2 * n, 16), 128))
 
 
-def adaptive_dropout(n, d, p_max=0.5):
-    return float(min(max(d / max(n, 1), 0.0), p_max))
+def adaptive_dropout(n, d, c=3.0, p_min=0.1, p_max=0.5):
+    """Clamped adaptive dropout: p = clamp(c * d/n, p_min, p_max).
+
+    Rationale: raw d/n systematically under-estimates required regularization
+    on small data (empirical sweep: optimum p in [0.1, 0.2] on most datasets,
+    while d/n gives ~0.02-0.08). Lower bound p_min=0.1 ensures dropout is
+    active even for very small d/n; multiplier c=3 calibrates the slope.
+    """
+    return float(min(max(c * d / max(n, 1), p_min), p_max))
 
 
 class _Backbone(nn.Module):
