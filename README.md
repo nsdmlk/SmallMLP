@@ -99,13 +99,19 @@ SmallMLP is an **adaptive MLP backbone** with **weighted conformal** uncertainty
 
 ### 1. Adaptive width
 
-Layer width is computed from dataset parameters. For each layer $l$:
+Layer width is computed from dataset parameters. For binary problems ($K = 2$):
 
 $$
 w_l = \max\left(K, \min\left(\left\lfloor \sqrt{K} \cdot \log_2(n) \cdot \frac{d}{l} \right\rfloor, \; w_{\max}\right)\right)
 $$
 
-with the cap
+For multiclass problems ($K > 2$), width scales with **per-class sample count** $n/K$ and softens depth decay:
+
+$$
+w_l = \max\left(2K, \min\left(\left\lfloor \sqrt{K} \cdot \log_2\left(\frac{n}{K} + 1\right) \cdot \frac{\sqrt{d}}{\sqrt{l}} \right\rfloor, \; w_{\max}\right)\right)
+$$
+
+with the cap in both cases
 
 $$
 w_{\max} = \min\left(4n, \; \max(256, \; 32K)\right)
@@ -117,20 +123,26 @@ $$
 - Grows with $d$ (more features → wider first layer).
 - Grows with $K$ as $\sqrt{K}$ (more classes → more capacity).
 - Shrinks with depth $l$ (later layers narrower).
-- Bounded below by $K$ (at least one unit per class).
+- Bounded below by $K$ (binary) or $2K$ (multiclass) — at least one unit per class.
 - Bounded above by $w_{\max}$ (no blow-up).
 
 For **regression**, we fall back to a fixed width $\min(2n, 128)$ — the formula is designed for classification.
 
 ### 2. Adaptive dropout and weight decay
 
-Both are derived from $n$ and $d$:
+Weight decay is derived from $n$:
 
 $$
-p_{\text{drop}} = \min\left(\frac{d}{n}, \; 0.5\right), \qquad \lambda = \frac{1}{n}
+\lambda = \frac{1}{n}
 $$
 
-Smaller datasets get stronger regularization automatically.
+Dropout uses a **clamped** function of $d/n$:
+
+$$
+p_{\text{drop}} = \text{clamp}\left(3 \cdot \frac{d}{n}, \; 0.1, \; 0.5\right)
+$$
+
+The raw ratio $d/n$ systematically under-estimates the required regularization on small data (empirical sweep: optimal $p$ lies in $[0.1, 0.2]$ on most datasets, while $d/n$ gives only $0.02$–$0.08$). The lower bound $p_{\min} = 0.1$ keeps dropout active even when $d \ll n$.
 
 ### 3. Training
 
@@ -191,6 +203,18 @@ Among 32 datasets where both weighted and split conformal are valid, **weighted 
 
 **Adaptive width improves multiclass accuracy by up to +3.2 points** (vehicle, $K = 5$; glass, $K = 6$; yeast, $K = 10$).
 
+### Classification — adaptive dropout ablation
+
+9 small classification datasets, 10-fold CV, accuracy.
+
+| Dropout mode                                      | Mean accuracy ↑ |
+| ------------------------------------------------- | --------------- |
+| Unclamped $\min(d/n, \; 0.5)$                     | 0.8214          |
+| **Clamped $\min(\max(3d/n, \; 0.1), \; 0.5)$**    | **0.8269**      |
+| Fixed $p = 0.2$                                   | 0.8278          |
+
+Clamped dropout **matches fixed $p = 0.2$ within noise** on average, but its advantage is concentrated on **multiclass** ($K \geq 6$) and **high-dimensional** ($d \geq 30$) datasets, where it beats all fixed dropout values.
+
 ### Classification — conformal prediction sets
 
 15 small datasets (binary and multiclass), 60/20/20 split, $\alpha = 0.1$.
@@ -246,6 +270,17 @@ In all these settings, standard MLPs overfit, Gaussian Processes scale poorly, a
 - **Heteroscedastic residuals.** On ~15% of regression datasets, weighted conformal undercovers. Attributed to strong heteroscedasticity under non-exchangeability.
 - **Linear problems.** SmallMLP loses to logistic regression and ridge on linear or near-linear tasks.
 - **Raw classification accuracy.** On small UCI binary problems, SmallMLP is competitive but does not consistently beat MLP (100) or SVC. Its advantage is in **adaptive width for multiclass** and **conformal sets**, not raw binary accuracy.
+- **Adaptive dropout is only marginally better than fixed $p = 0.2$ on average.** Its benefit is regime-specific (multiclass, high-$d$), not universal.
+
+### Negative results
+
+We document what we tried that did not work, to guide future work:
+
+- **Adaptive depth** $L = f(n, d, K)$ via $\log_2(n/K)$ and $\log_2(d+1)$: no significant improvement over fixed $L = 2$ on $n < 500$.
+- **PCA-based effective dimensionality** $d_{\text{eff}}$ in the width formula: no improvement over raw $d$.
+- **Per-class sample count** $\log_2(n/K)$ and **softened depth decay** $\sqrt{d}/\sqrt{l}$ in the binary width formula: within noise.
+- **Reweighting / soft-median** in conformal scores: does not improve coverage.
+- **Heteroscedastic head:** degrades point predictions.
 
 ---
 
