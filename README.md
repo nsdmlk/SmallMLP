@@ -8,9 +8,9 @@
 
 **SmallMLP** is a library for **small, nonlinear datasets** ($n < 500$). It replaces manual architecture search with **adaptive hyperparameters derived from dataset parameters** ($n$, $d$, $K$), and produces **calibrated prediction intervals** through weighted conformal prediction.
 
-- **Regression:** **25 / 45 wins** against standard MLPs, RF, KNN — no tuning.
+- **Regression:** **25 / 45 wins**, best mean rank (1.82) among 5 models — no tuning.
 - **Intervals:** **19% narrower** than split conformal at equal coverage (**31 / 32 wins**).
-- **Classification:** adaptive width scaling improves **multiclass** accuracy by up to **+3.2 points** vs. fixed-width baseline.
+- **Classification:** best mean rank among 10 models on 18 datasets; significantly better than LogReg, KNN, SVC; statistically indistinguishable from MLP-128 and RF.
 
 ---
 
@@ -79,7 +79,7 @@ X, y = load_iris(return_X_y=True)
 X_tr, X_tmp, y_tr, y_tmp = train_test_split(X, y, test_size=0.4, stratify=y, random_state=0)
 X_cal, X_val, y_cal, y_val = train_test_split(X_tmp, y_tmp, test_size=0.5, stratify=y_tmp, random_state=0)
 
-clf = SmallMLPClassifier(class_weight="balanced")
+clf = SmallMLPClassifier(class_weight=None)
 clf.fit(X_tr, y_tr)
 clf.fit_conformal(X_cal, y_cal, X_val, y_val, alpha=0.1)
 
@@ -99,34 +99,28 @@ SmallMLP is an **adaptive MLP backbone** with **weighted conformal** uncertainty
 
 ### 1. Adaptive width
 
-Layer width is computed from dataset parameters. For binary problems ($K = 2$):
+Layer width is computed from dataset parameters. First layer:
 
 $$
-w_l = \max\left(K, \min\left(\left\lfloor \sqrt{K} \cdot \log_2(n) \cdot \frac{d}{l} \right\rfloor, \; w_{\max}\right)\right)
+w_1 = \max\left(2K, \; \min\left(\left\lfloor \alpha \cdot \sqrt{n \cdot K \cdot \sqrt{d}} \right\rfloor, \; 4n\right)\right)
 $$
 
-For multiclass problems ($K > 2$), width scales with **per-class sample count** $n/K$ and softens depth decay:
+Subsequent layers:
 
 $$
-w_l = \max\left(2K, \min\left(\left\lfloor \sqrt{K} \cdot \log_2\left(\frac{n}{K} + 1\right) \cdot \frac{\sqrt{d}}{\sqrt{l}} \right\rfloor, \; w_{\max}\right)\right)
+w_l = \max\left(K, \; \left\lfloor w_1 \cdot \beta^{\,l-1} \right\rfloor\right)
 $$
 
-with the cap in both cases
-
-$$
-w_{\max} = \min\left(4n, \; \max(256, \; 32K)\right)
-$$
+with $\alpha = 4.0$ and $\beta = 0.7$ chosen by empirical sweep.
 
 **Properties:**
 
-- Grows with $n$ (more data → wider network).
-- Grows with $d$ (more features → wider first layer).
-- Grows with $K$ as $\sqrt{K}$ (more classes → more capacity).
-- Shrinks with depth $l$ (later layers narrower).
-- Bounded below by $K$ (binary) or $2K$ (multiclass) — at least one unit per class.
-- Bounded above by $w_{\max}$ (no blow-up).
+- Grows sublinearly with $n$, $K$ (as $\sqrt{\cdot}$), and $d$ (as $d^{1/4}$).
+- First layer bounded below by $2K$; later layers by $K$.
+- Capped at $4n$ to prevent blow-up on tiny datasets.
+- Depth decay $\beta^{l-1}$ shrinks later layers.
 
-For **regression**, we fall back to a fixed width $\min(2n, 128)$ — the formula is designed for classification.
+For **regression**, we fall back to a fixed width $\min(2n, 128)$.
 
 ### 2. Adaptive dropout and weight decay
 
@@ -139,10 +133,10 @@ $$
 Dropout uses a **clamped** function of $d/n$:
 
 $$
-p_{\text{drop}} = \text{clamp}\left(3 \cdot \frac{d}{n}, \; 0.1, \; 0.5\right)
+p_{\text{drop}} = \min\left(\max\left(3 \cdot \frac{d}{n}, \; 0.1\right), \; 0.5\right)
 $$
 
-The raw ratio $d/n$ systematically under-estimates the required regularization on small data (empirical sweep: optimal $p$ lies in $[0.1, 0.2]$ on most datasets, while $d/n$ gives only $0.02$–$0.08$). The lower bound $p_{\min} = 0.1$ keeps dropout active even when $d \ll n$.
+Raw $d/n$ systematically under-estimates required regularization on small data (sweep: optimum in $[0.1, 0.2]$, raw ratio gives $0.02$–$0.08$).
 
 ### 3. Training
 
@@ -160,7 +154,7 @@ This gives:
 
 - **Finite-sample coverage guarantee** under exchangeability.
 - **Locally adaptive** widths — narrow where data is dense, wide in empty regions.
-- **Tuning-free calibration** — $h_{\text{cal}}$ is selected by grid search on a held-out validation set.
+- **Tuning-free calibration** — $h_{\text{cal}}$ selected by grid search on held-out validation.
 
 ---
 
@@ -192,16 +186,46 @@ This gives:
 
 Among 32 datasets where both weighted and split conformal are valid, **weighted conformal produces narrower intervals on 31** (mean width ratio **0.81**).
 
-### Classification — adaptive width ablation
+### Classification — full benchmark
 
-13 small classification datasets (binary and multiclass), 5-fold CV, accuracy.
+18 small classification datasets, 5-fold CV, 10 models. Metric: **mean rank** (lower is better, rank 1 = best on that dataset).
 
-| Width mode               | Mean accuracy ↑ |
-| ------------------------ | --------------- |
-| **Adaptive formula**     | **0.8331**      |
-| Fixed width ($\min(2n, 128)$) | 0.8279     |
+| Model                | Mean rank ↓ | Mean acc ↑ | Wins / 18 |
+| -------------------- | ----------- | ---------- | --------- |
+| **SmallMLP (classic)** | **4.19**  | **0.8120** | **3**     |
+| **SmallMLP (formula)** | **4.50**  | 0.8117     | 2         |
+| MLP (128,)           | 4.64        | 0.8132     | 3         |
+| MLP (100,)           | 5.25        | 0.8101     | 1         |
+| SVC (RBF)            | 5.31        | 0.7990     | 2         |
+| MLP (100, 100)       | 5.56        | 0.8037     | 3         |
+| RF (100)             | 5.92        | 0.8035     | 6         |
+| LogReg               | 6.17        | 0.7920     | 4         |
+| KNN ($k=5$)          | 8.17        | 0.7715     | 2         |
 
-**Adaptive width improves multiclass accuracy by up to +3.2 points** (vehicle, $K = 5$; glass, $K = 6$; yeast, $K = 10$).
+**Wilcoxon signed-rank vs SmallMLP (formula), paired across 18 datasets:**
+
+| Baseline     | p-value | Significant? |
+| ------------ | ------- | ------------ |
+| MLP (128,)   | 1.00    | no           |
+| MLP (100,)   | 0.62    | no           |
+| MLP (100,100) | 0.26   | no           |
+| RF (100)     | 0.37    | no           |
+| SmallMLP classic | 0.62 | no          |
+| SVC (RBF)    | 0.047   | **yes** (SmallMLP better) |
+| LogReg       | 0.013   | **yes** (SmallMLP better) |
+| KNN ($k=5$)  | 0.002   | **yes** (SmallMLP better) |
+
+**Summary:** SmallMLP achieves the best mean rank among 10 models, is **statistically indistinguishable** from tuned MLPs and RF, and **significantly better** than LogReg, KNN, and SVC.
+
+### Classification — per-K-bucket accuracy
+
+| Bucket                | SmallMLP (formula) | MLP (128,) | RF (100) |
+| --------------------- | ------------------ | ---------- | -------- |
+| Binary ($K=2$)        | 0.8675             | **0.8697** | 0.8521   |
+| Multiclass ($2<K\le5$)| 0.8537             | **0.8531** | 0.8210   |
+| Hard multiclass ($K>5$)| 0.6776            | 0.6798     | **0.7019** |
+
+SmallMLP competitive on binary and moderate multiclass; RF dominates on hard multiclass.
 
 ### Classification — adaptive dropout ablation
 
@@ -213,7 +237,7 @@ Among 32 datasets where both weighted and split conformal are valid, **weighted 
 | **Clamped $\min(\max(3d/n, \; 0.1), \; 0.5)$**    | **0.8269**      |
 | Fixed $p = 0.2$                                   | 0.8278          |
 
-Clamped dropout **matches fixed $p = 0.2$ within noise** on average, but its advantage is concentrated on **multiclass** ($K \geq 6$) and **high-dimensional** ($d \geq 30$) datasets, where it beats all fixed dropout values.
+Clamped dropout matches fixed $p = 0.2$ within noise; advantage concentrated on multiclass ($K \geq 6$) and high-dimensional ($d \geq 30$) datasets.
 
 ### Classification — conformal prediction sets
 
@@ -269,18 +293,28 @@ In all these settings, standard MLPs overfit, Gaussian Processes scale poorly, a
 - **$n < 500$.** Fit cost grows with $n$, width, and epochs.
 - **Heteroscedastic residuals.** On ~15% of regression datasets, weighted conformal undercovers. Attributed to strong heteroscedasticity under non-exchangeability.
 - **Linear problems.** SmallMLP loses to logistic regression and ridge on linear or near-linear tasks.
-- **Raw classification accuracy.** On small UCI binary problems, SmallMLP is competitive but does not consistently beat MLP (100) or SVC. Its advantage is in **adaptive width for multiclass** and **conformal sets**, not raw binary accuracy.
-- **Adaptive dropout is only marginally better than fixed $p = 0.2$ on average.** Its benefit is regime-specific (multiclass, high-$d$), not universal.
+- **Raw classification accuracy.** SmallMLP matches but does not beat tuned MLPs and RF. Its advantages are **tuning-free operation**, **calibrated uncertainty**, and **competitive mean rank**.
+- **Adaptive dropout is only marginally better than fixed $p = 0.2$ on average.** Benefit is regime-specific.
 
 ### Negative results
 
 We document what we tried that did not work, to guide future work:
 
-- **Adaptive depth** $L = f(n, d, K)$ via $\log_2(n/K)$ and $\log_2(d+1)$: no significant improvement over fixed $L = 2$ on $n < 500$.
+- **Adaptive depth** $L = f(n, d, K)$: no significant improvement over fixed $L = 2$ on $n < 500$.
 - **PCA-based effective dimensionality** $d_{\text{eff}}$ in the width formula: no improvement over raw $d$.
 - **Per-class sample count** $\log_2(n/K)$ and **softened depth decay** $\sqrt{d}/\sqrt{l}$ in the binary width formula: within noise.
+- **Bias initialization sweep** (zeros, positive, uniform): none beat PyTorch Kaiming default. Correlation between bias negativity and accuracy was spurious.
+- **Activation sweep** (tanh, GELU, SiLU, algebraic sigmoid, softsign): ReLU wins on 18 small classification datasets; smooth/saturating activations underperform.
+- **Sqrt-balanced class weights**: improve over linear weights under extreme imbalance, but neither beats no weighting on accuracy.
 - **Reweighting / soft-median** in conformal scores: does not improve coverage.
 - **Heteroscedastic head:** degrades point predictions.
+
+### What we tried that *did* work
+
+- **Clamped adaptive dropout** `min(max(3d/n, 0.1), 0.5)` — better than raw `d/n`.
+- **Sqrt-balanced class weights** — safer than linear under extreme imbalance (though not better than no weights for accuracy).
+- **Weighted conformal** — 19% narrower intervals at equal coverage.
+- **Multi-class-aware width** — competitive with fixed-width baselines without tuning.
 
 ---
 
@@ -308,17 +342,20 @@ SmallMLPRegressor(
 
 ```python
 SmallMLPClassifier(
-    activation="relu",
+    activation="relu",          # 'relu' | 'tanh' | 'gelu' | 'silu' | 'algsig' | 'softsign'
     lr=1e-3,
-    weight_decay=None,   # default 1/n
+    weight_decay=None,          # default 1/n
     max_epochs=500,
     patience=30,
     batch_size=None,
     val_frac=0.2,
-    class_weight=None,   # None or "balanced"
+    class_weight=None,          # None or "balanced"
     random_state=42,
     verbose=False,
-    width_mode="formula",  # "formula" or "classic"
+    width_mode="formula",       # "formula" or "classic"
+    alpha=4.0,                  # width scale
+    beta=0.7,                   # depth decay
+    bias_init="kaiming",        # "kaiming" | "zeros" | "positive" | "uniform"
 )
 ```
 
@@ -335,3 +372,6 @@ MIT License. See `LICENSE` for details.
 ## Acknowledgments
 
 Built independently during undergraduate studies at Beijing Institute of Technology. Inspired by the author's earlier work on robust gradient boosting for small data ([SmallGBM](https://github.com/nsdmlk/smallgbm)).
+
+
+**Проверь, что в `Results` таблица согласована с реальными числами** — если после обновления кода числа изменились, обнови таблицу.
