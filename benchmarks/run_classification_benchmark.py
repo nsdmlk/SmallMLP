@@ -1,23 +1,32 @@
 """
-ReLU bottleneck sweep.
+Full classification benchmark with extended metrics.
 
-For each dataset, train SmallMLPClassifier with ReLU and measure:
-  T1 — dead units per layer (fraction of units that output 0 for all inputs)
-  T2 — bias negativity (fraction of negative biases per layer)
-  T3 — dead-zone inputs (fraction of pre-activations < -2)
-  T4 — pre-activation distribution (mean, std, skewness)
-  T5 — gradient norm per layer at end of training
+Metrics:
+  - mean accuracy
+  - median accuracy
+  - mean rank (lower better)
+  - win count (best on dataset)
+  - top-3 count (in top 3 on dataset)
+  - Wilcoxon vs SmallMLP
 
-Goal: find which of these correlates with low accuracy.
+Run:
+  python benchmark_classification_full.py
 """
 
 import warnings
 import numpy as np
-import torch
-import torch.nn as nn
-from sklearn.model_selection import StratifiedKFold, train_test_split
-from sklearn.preprocessing import StandardScaler
+import pandas as pd
+from scipy.stats import wilcoxon
+from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import accuracy_score
+from sklearn.neural_network import MLPClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.base import clone
 
 from smallmlp import SmallMLPClassifier
 from run_full_benchmark import build_classification_datasets
@@ -25,84 +34,170 @@ from run_full_benchmark import build_classification_datasets
 warnings.filterwarnings("ignore")
 
 
-def measure_relu(clf, X_np, y_np):
-    """Return diagnostic metrics for a trained ReLU model."""
-    X = torch.tensor(StandardScaler().fit_transform(X_np), dtype=torch.float32)
-    model = clf._model
-    model.eval()
+def make_models():
+    return {
+        "LogReg": Pipeline([
+            ("scaler", StandardScaler()),
+            ("model", LogisticRegression(max_iter=500)),
+        ]),
+        "MLP_100": Pipeline([
+            ("scaler", StandardScaler()),
+            ("model", MLPClassifier(hidden_layer_sizes=(100,),
+                                     max_iter=1000, random_state=42)),
+        ]),
+        "MLP_128": Pipeline([
+            ("scaler", StandardScaler()),
+            ("model", MLPClassifier(hidden_layer_sizes=(128,),
+                                     max_iter=1000, random_state=42)),
+        ]),
+        "MLP_100_100": Pipeline([
+            ("scaler", StandardScaler()),
+            ("model", MLPClassifier(hidden_layer_sizes=(100, 100),
+                                     max_iter=1000, random_state=42)),
+        ]),
+        "KNN_k5": Pipeline([
+            ("scaler", StandardScaler()),
+            ("model", KNeighborsClassifier(n_neighbors=5)),
+        ]),
+        "RF_100": RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1),
+        "SVC_rbf": Pipeline([
+            ("scaler", StandardScaler()),
+            ("model", SVC(kernel="rbf", C=1.0, gamma="scale",
+                          probability=True, random_state=42)),
+        ]),
+        "SmallMLP_formula": SmallMLPClassifier(
+            width_mode="formula", class_weight=None,
+            alpha=4.0, beta=0.7, bias_init="kaiming",
+            max_epochs=500, patience=30, random_state=42,
+        ),
+        "SmallMLP_classic": SmallMLPClassifier(
+            width_mode="classic", class_weight=None,
+            max_epochs=500, patience=30, random_state=42,
+        ),
+        "SmallMLP_bal": SmallMLPClassifier(
+            width_mode="formula", class_weight="balanced",
+            alpha=4.0, beta=0.7, max_epochs=500, patience=30, random_state=42,
+        ),
+    }
 
-    metrics = {"n_layers": len(model.layers)}
-    h = X
-    with torch.no_grad():
-        for i, (fc, act, drop) in enumerate(zip(model.layers, model.acts, model.drops)):
-            pre = fc(h)
-            post = act(pre)
 
-            # T1: dead units (output 0 for all inputs)
-            dead_frac = (post.abs().max(dim=0).values < 1e-6).float().mean().item()
-
-            # T2: bias negativity
-            bias = fc.bias.detach()
-            bias_neg_frac = (bias < 0).float().mean().item()
-            bias_mean = bias.mean().item()
-
-            # T3: dead-zone inputs
-            deadzone_frac = (pre < -2).float().mean().item()
-
-            # T4: pre-activation distribution
-            pre_flat = pre.flatten()
-            pre_mean = pre_flat.mean().item()
-            pre_std = pre_flat.std().item()
-            pre_skew = ((pre_flat - pre_mean) ** 3).mean().item() / (pre_std ** 3 + 1e-9)
-
-            # T5: gradient norm (zero-grad fraction on ReLU)
-            zero_grad_frac = ((pre < 0).float()).mean().item()
-
-            metrics[f"L{i+1}_dead"] = dead_frac
-            metrics[f"L{i+1}_bias_neg"] = bias_neg_frac
-            metrics[f"L{i+1}_bias_mean"] = bias_mean
-            metrics[f"L{i+1}_deadzone"] = deadzone_frac
-            metrics[f"L{i+1}_pre_mean"] = pre_mean
-            metrics[f"L{i+1}_pre_std"] = pre_std
-            metrics[f"L{i+1}_pre_skew"] = pre_skew
-            metrics[f"L{i+1}_zero_grad_frac"] = zero_grad_frac
-
-            h = post
-
-    return metrics
-
-
-def run_diagnostic(datasets, n_splits=5, seed=42):
+def run_benchmark(datasets, n_splits=5, seed=42):
+    models = make_models()
     rows = []
     for name, X, y in datasets:
+        K = len(np.unique(y))
         skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
-        accs = []
-        fold_metrics = []
+        accs = {m: [] for m in models}
         for tr, te in skf.split(X, y):
-            clf = SmallMLPClassifier(
-                activation="relu", width_mode="formula",
-                class_weight=None, alpha=4.0, beta=0.7,
-                max_epochs=500, patience=30, random_state=seed,
-            )
-            try:
-                clf.fit(X[tr], y[tr])
-                acc = accuracy_score(y[te], clf.predict(X[te]))
-                metrics = measure_relu(clf, X[tr], y[tr])
-            except Exception as e:
-                warnings.warn(f"{name}: {e}")
-                acc = np.nan
-                metrics = {}
-            accs.append(acc)
-            if metrics:
-                fold_metrics.append(metrics)
+            for mname, model in models.items():
+                try:
+                    m = clone(model)
+                    m.fit(X[tr], y[tr])
+                    acc = accuracy_score(y[te], m.predict(X[te]))
+                except Exception as e:
+                    warnings.warn(f"{name} ({mname}): {e}")
+                    acc = np.nan
+                accs[mname].append(acc)
+        for mname in models:
+            rows.append({
+                "dataset": name, "K": K, "model": mname,
+                "acc": float(np.nanmean(accs[mname])),
+            })
+    return pd.DataFrame(rows)
 
-        row = {"dataset": name, "acc": float(np.nanmean(accs))}
-        if fold_metrics:
-            for k in fold_metrics[0]:
-                vals = [m[k] for m in fold_metrics if k in m]
-                row[k] = float(np.nanmean(vals))
-        rows.append(row)
-    return rows
+
+def summarize(df):
+    pivot = df.pivot(index="dataset", columns="model", values="acc")
+    names = pivot.index.tolist()
+    models = pivot.columns.tolist()
+
+    print("\n" + "=" * 110)
+    print("MEAN ACCURACY")
+    print("=" * 110)
+    print(f"{'model':<20} {'mean':>10} {'median':>10} {'std':>10}")
+    for m in models:
+        vals = pivot[m].values
+        print(f"{m:<20} {np.mean(vals):>10.4f} {np.median(vals):>10.4f} "
+              f"{np.std(vals):>10.4f}")
+
+    print("\n" + "=" * 110)
+    print("MEAN RANK (lower = better)")
+    print("=" * 110)
+    ranks = pivot.rank(axis=1, ascending=False, method="average")
+    mean_rank = ranks.mean(axis=0).sort_values()
+    for m in mean_rank.index:
+        print(f"{m:<20} {mean_rank[m]:>10.3f}")
+
+    print("\n" + "=" * 110)
+    print("WIN COUNT (best on dataset)")
+    print("=" * 110)
+    wins = (pivot == pivot.max(axis=1).values[:, None]).sum(axis=0).sort_values(ascending=False)
+    for m in wins.index:
+        print(f"{m:<20} {int(wins[m]):>10}")
+
+    print("\n" + "=" * 110)
+    print("TOP-3 COUNT (in top 3 on dataset)")
+    print("=" * 110)
+    top3 = np.zeros(len(models))
+    for i, ds in enumerate(names):
+        row = pivot.loc[ds].values
+        order = np.argsort(-row)
+        for j in order[:3]:
+            top3[j] += 1
+    top3_series = pd.Series(top3, index=models).sort_values(ascending=False)
+    for m in top3_series.index:
+        print(f"{m:<20} {int(top3_series[m]):>10}")
+
+    print("\n" + "=" * 110)
+    print("PAIRWISE WINS (row > col)")
+    print("=" * 110)
+    print(f"{'':<20} " + " ".join(f"{m[:8]:>8}" for m in models))
+    for a in models:
+        row = f"{a:<20} "
+        for b in models:
+            if a == b:
+                row += f"{'—':>8} "
+            else:
+                w = sum(1 for n in names if pivot.loc[n, a] > pivot.loc[n, b] + 1e-9)
+                row += f"{w:>8} "
+        print(row)
+
+    print("\n" + "=" * 110)
+    print("WILCOXON vs SmallMLP_formula (paired across datasets)")
+    print("=" * 110)
+    ref = "SmallMLP_formula"
+    if ref in pivot.columns:
+        sm = pivot[ref].values
+        print(f"{'baseline':<20} {'stat':>10} {'p':>10} {'wins':>6} {'losses':>8}")
+        for m in models:
+            if m == ref:
+                continue
+            other = pivot[m].values
+            wins = int(np.sum(sm > other + 1e-9))
+            losses = int(np.sum(sm < other - 1e-9))
+            try:
+                stat, p = wilcoxon(sm, other, zero_method="wilcox", alternative="two-sided")
+            except Exception:
+                stat, p = np.nan, np.nan
+            print(f"{m:<20} {stat:>10.3f} {p:>10.4f} {wins:>6} {losses:>8}")
+
+    print("\n" + "=" * 110)
+    print("PER-K-BUCKET mean accuracy")
+    print("=" * 110)
+    def bucket(K):
+        if K == 2: return "binary"
+        if K <= 5: return "multiclass_2_5"
+        return "multiclass_gt5"
+    Kmap = df.groupby("dataset")["K"].first().to_dict()
+    bmap = {n: bucket(Kmap[n]) for n in names}
+    for b in ["binary", "multiclass_2_5", "multiclass_gt5"]:
+        subset = [n for n in names if bmap[n] == b]
+        if not subset:
+            continue
+        print(f"\n  [{b}] n={len(subset)}")
+        for m in models:
+            vals = [pivot.loc[n, m] for n in subset]
+            print(f"    {m:<20} {np.mean(vals):>10.4f}")
 
 
 def main():
@@ -110,51 +205,10 @@ def main():
     datasets = [(n, X, y) for n, X, y in datasets if np.bincount(y).min() >= 5]
     print(f"Using {len(datasets)} datasets")
 
-    rows = run_diagnostic(datasets, n_splits=5, seed=42)
-
-    # print table of key metrics
-    print()
-    keys = ["acc",
-            "L1_dead", "L1_bias_neg", "L1_deadzone", "L1_pre_std", "L1_pre_skew", "L1_zero_grad_frac",
-            "L2_dead", "L2_bias_neg", "L2_deadzone", "L2_pre_std", "L2_pre_skew", "L2_zero_grad_frac"]
-
-    print(f"{'dataset':<22} " + " ".join(f"{k:>10}" for k in keys))
-    for row in rows:
-        line = f"{row['dataset']:<22} "
-        for k in keys:
-            v = row.get(k, np.nan)
-            line += f"{v:>10.3f} "
-        print(line)
-
-    # correlations with accuracy
-    print()
-    print("Correlation of each metric with accuracy (across datasets):")
-    accs = np.array([r["acc"] for r in rows])
-    for k in keys:
-        if k == "acc":
-            continue
-        vals = np.array([r.get(k, np.nan) for r in rows])
-        mask = np.isfinite(vals) & np.isfinite(accs)
-        if mask.sum() < 3:
-            continue
-        corr = np.corrcoef(vals[mask], accs[mask])[0, 1]
-        print(f"  {k:<20} corr={corr:+.3f}")
-
-    # identify worst datasets
-    print()
-    print("Worst 5 datasets by accuracy:")
-    sorted_rows = sorted(rows, key=lambda r: r["acc"])
-    for r in sorted_rows[:5]:
-        print(f"  {r['dataset']:<22} acc={r['acc']:.4f}  "
-              f"L1_dead={r.get('L1_dead', np.nan):.3f}  "
-              f"L1_deadzone={r.get('L1_deadzone', np.nan):.3f}  "
-              f"L1_bias_neg={r.get('L1_bias_neg', np.nan):.3f}  "
-              f"L2_deadzone={r.get('L2_deadzone', np.nan):.3f}")
-
-    # save
-    import pandas as pd
-    pd.DataFrame(rows).to_csv("benchmarks/relu_diagnostic.csv", index=False)
-    print("\nSaved to benchmarks/relu_diagnostic.csv")
+    df = run_benchmark(datasets, n_splits=5, seed=42)
+    df.to_csv("benchmarks/results_classification_full.csv", index=False)
+    print("Saved to benchmarks/results_classification_full.csv")
+    summarize(df)
 
 
 if __name__ == "__main__":

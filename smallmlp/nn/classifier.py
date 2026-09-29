@@ -25,13 +25,19 @@ class SmallMLPClassifier(BaseEstimator, ClassifierMixin):
       None       — no class weighting (default, best for accuracy)
       'balanced' — sqrt-balanced weights, applied only when ratio > 2.
                    Improves rare-class recall at the cost of accuracy.
+
+    bias_init:
+      'kaiming'  — PyTorch default (uniform, centered ~0)
+      'zeros'    — bias = 0
+      'positive' — bias = +0.1 (keeps ReLU in active region)
+      'uniform'  — bias ~ U(0, 0.5)
     """
 
     def __init__(self, activation="relu", lr=1e-3, weight_decay=None,
                  max_epochs=500, patience=30, batch_size=None,
                  val_frac=0.2, class_weight=None, random_state=42,
                  verbose=False, width_mode="formula",
-                 alpha=4.0, beta=0.7):
+                 alpha=4.0, beta=0.7, bias_init="kaiming"):
         self.activation = activation
         self.lr = lr
         self.weight_decay = weight_decay
@@ -45,6 +51,7 @@ class SmallMLPClassifier(BaseEstimator, ClassifierMixin):
         self.width_mode = width_mode
         self.alpha = alpha
         self.beta = beta
+        self.bias_init = bias_init
 
     def fit(self, X, y):
         X, y = check_X_y(X, y)
@@ -87,6 +94,7 @@ class SmallMLPClassifier(BaseEstimator, ClassifierMixin):
             dropout=dropout, activation=self.activation,
             width_mode=self.width_mode,
             alpha=self.alpha, beta=self.beta,
+            bias_init=self.bias_init,
         )
         out_dim = self._model.output_dim
 
@@ -94,6 +102,7 @@ class SmallMLPClassifier(BaseEstimator, ClassifierMixin):
             print(f"[SmallMLPClassifier] n={n} d={self.n_features_in_} "
                   f"K={self.n_classes_} width_mode={self.width_mode} "
                   f"alpha={self.alpha} beta={self.beta} "
+                  f"bias_init={self.bias_init} "
                   f"dropout={dropout:.3f} wd={wd:.4f}")
             print(f"  widths={self._model.widths}")
 

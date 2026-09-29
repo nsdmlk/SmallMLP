@@ -78,6 +78,9 @@ _ACTIVATIONS = {
 }
 
 
+_BIAS_INITS = ("kaiming", "zeros", "positive", "uniform")
+
+
 class _Backbone(nn.Module):
     """Two-layer MLP with configurable width mode.
 
@@ -87,10 +90,17 @@ class _Backbone(nn.Module):
 
     activation:
       'relu' | 'tanh' | 'gelu' | 'silu' | 'algsig' | 'softsign'
+
+    bias_init:
+      'kaiming'  — PyTorch default (uniform, centered ~0)
+      'zeros'    — bias = 0
+      'positive' — bias = +0.1 (keeps ReLU in active region)
+      'uniform'  — bias ~ U(0, 0.5)
     """
 
     def __init__(self, d_in, n, K=2, dropout=0.0, activation="relu",
-                 n_layers=2, width_mode="formula", alpha=4.0, beta=0.7):
+                 n_layers=2, width_mode="formula", alpha=4.0, beta=0.7,
+                 bias_init="kaiming"):
         super().__init__()
 
         if activation not in _ACTIVATIONS:
@@ -113,6 +123,7 @@ class _Backbone(nn.Module):
         self.widths = widths
         self.width_mode = width_mode
         self.activation = activation
+        self.bias_init = bias_init
 
         self.layers = nn.ModuleList()
         self.layers.append(nn.Linear(d_in, widths[0]))
@@ -122,7 +133,24 @@ class _Backbone(nn.Module):
         self.acts = nn.ModuleList([act() for _ in range(n_layers)])
         self.drops = nn.ModuleList([nn.Dropout(dropout) for _ in range(n_layers)])
 
+        self._apply_bias_init(bias_init)
+
         self.output_dim = widths[-1]
+
+    def _apply_bias_init(self, mode):
+        if mode not in _BIAS_INITS:
+            raise ValueError(
+                f"Unknown bias_init: {mode!r}. Available: {_BIAS_INITS}"
+            )
+        if mode == "kaiming":
+            return  # PyTorch default
+        for fc in self.layers:
+            if mode == "zeros":
+                nn.init.constant_(fc.bias, 0.0)
+            elif mode == "positive":
+                nn.init.constant_(fc.bias, 0.1)
+            elif mode == "uniform":
+                nn.init.uniform_(fc.bias, 0.0, 0.5)
 
     def forward(self, x):
         h = x
