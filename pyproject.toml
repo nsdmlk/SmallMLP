@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "smallmlp"
-version = "0.2.0"
-description = "Non-parametric regression and classification for small nonlinear data, with calibrated prediction intervals."
+version = "0.3.0"
+description = "Adaptive neural networks for small nonlinear data, with calibrated conformal intervals."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -16,10 +16,11 @@ keywords = [
     "machine-learning",
     "small-data",
     "tabular",
-    "non-parametric",
+    "adaptive-mlp",
     "uncertainty",
     "conformal-prediction",
-    "kernel-methods",
+    "tuning-free",
+    "scientific-ml",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
