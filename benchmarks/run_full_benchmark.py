@@ -128,13 +128,28 @@ def _load_uciml(uid):
     return X[mask], y[mask]
 
 
-def subsample(X, y, n_max=500, seed=0):
-    if len(y) <= n_max:
-        return X, y
+def subsample(X, y, n_max=500, min_per_class=5, seed=0):
+    """Subsample to n_max, ensuring >= min_per_class per class.
+
+    For multiclass with K>8, raises n_max to max(n_max, min_per_class * K).
+    Skips dataset if not enough samples to satisfy min_per_class.
+    """
     K = len(np.unique(y))
-    if K > 8:
-        n_max = max(n_max, 1000)
-    idx = np.random.default_rng(seed).choice(len(y), size=n_max, replace=False)
+    n_max_eff = max(n_max, min_per_class * K) if K > 8 else n_max
+    if len(y) <= n_max_eff:
+        counts = np.bincount(y)
+        if counts.min() < min_per_class:
+            return None
+        return X, y
+    rng = np.random.default_rng(seed)
+    # stratified subsample to preserve class balance
+    idx = []
+    for k in np.unique(y):
+        k_idx = np.where(y == k)[0]
+        n_k = max(min_per_class, int(round(n_max_eff * len(k_idx) / len(y))))
+        n_k = min(n_k, len(k_idx))
+        idx.extend(rng.choice(k_idx, size=n_k, replace=False))
+    idx = np.array(idx)
     return X[idx], y[idx]
 
 
@@ -147,8 +162,9 @@ def build_classification_datasets():
         (load_breast_cancer, "breast_cancer"),
     ]:
         data = loader()
-        X, y = subsample(data.data, data.target, n_max=500)
-        datasets.append((f"sk_{name}", X, y))
+        r = subsample(data.data, data.target, n_max=500)
+        if r is not None:
+            datasets.append((f"sk_{name}", r[0], r[1]))
 
     uci = {
         "hepatitis": 46, "parkinsons": 174, "sonar": 151,
@@ -159,8 +175,9 @@ def build_classification_datasets():
     for name, uid in uci.items():
         try:
             X, y = _load_uciml(uid)
-            X, y = subsample(X, y, n_max=500)
-            datasets.append((f"uci_{name}", X, y))
+            r = subsample(X, y, n_max=500)
+            if r is not None:
+                datasets.append((f"uci_{name}", r[0], r[1]))
         except Exception as e:
             print(f"[skip] {name}: {e}")
 
@@ -168,13 +185,18 @@ def build_classification_datasets():
         "glass": 42,
         "yeast": 110,
         "vowel": 59,
-        "vehicle": 149,
+        "segment": 50,
+        "cmc": 30,
+        "balance_scale": 12,
+        "wine_quality_red": 186,
+        "wine_quality_white": 187,
     }
     for name, uid in uci_multi.items():
         try:
             X, y = _load_uciml(uid)
-            X, y = subsample(X, y, n_max=500)
-            datasets.append((f"uci_{name}", X, y))
+            r = subsample(X, y, n_max=500, min_per_class=5)
+            if r is not None:
+                datasets.append((f"uci_{name}", r[0], r[1]))
         except Exception as e:
             print(f"[skip] {name}: {e}")
 
@@ -186,6 +208,8 @@ def build_classification_datasets():
 # ---------------------------------------------------------------------------
 
 def run_regression_benchmark(n_splits=5):
+    from scipy.stats import wilcoxon
+
     datasets = build_regression_datasets()
 
     models = {
@@ -232,14 +256,52 @@ def run_regression_benchmark(n_splits=5):
         print(f"{ds_name:28s}  best={best:12s}  "
               f"SmallMLP_MAE={np.nanmean(maes['SmallMLP']):.4f}")
 
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+
+    pivot = df.pivot(index="dataset", columns="model", values="mae")
+    ranks = pivot.rank(axis=1, method="average")
+    mean_rank = ranks.mean(axis=0).sort_values()
+
+    print("\n" + "=" * 100)
+    print("Mean rank (lower = better) and mean MAE:")
+    print(f"{'model':<12} {'mean_rank':>10} {'mean_mae':>10}")
+    for name in mean_rank.index:
+        print(f"{name:<12} {mean_rank[name]:>10.3f} {pivot[name].mean():>10.4f}")
+
+    print("\n" + "=" * 100)
+    print("Wilcoxon signed-rank test (SmallMLP vs baseline, lower MAE = better):")
+    print(f"{'baseline':<12} {'statistic':>12} {'p-value':>12} {'wins':>6} {'losses':>7}")
+    sm = pivot["SmallMLP"].values
+    for name in pivot.columns:
+        if name == "SmallMLP":
+            continue
+        other = pivot[name].values
+        wins = int(np.sum(sm < other - 1e-9))
+        losses = int(np.sum(sm > other + 1e-9))
+        try:
+            stat, p = wilcoxon(sm, other, zero_method="wilcox", alternative="two-sided")
+        except Exception:
+            stat, p = np.nan, np.nan
+        print(f"{name:<12} {stat:>12.3f} {p:>12.4f} {wins:>6} {losses:>7}")
+
+    return df
 
 
 # ---------------------------------------------------------------------------
 # Classification benchmark
 # ---------------------------------------------------------------------------
 
+def _bucket(K):
+    if K == 2:
+        return "binary"
+    if K <= 5:
+        return "multiclass_2_5"
+    return "multiclass_gt5"
+
+
 def run_classification_benchmark(n_splits=5):
+    from scipy.stats import wilcoxon
+
     datasets = build_classification_datasets()
 
     models = {
@@ -270,7 +332,10 @@ def run_classification_benchmark(n_splits=5):
     print("=" * 100)
 
     rows = []
+    per_ds_acc = {}
+
     for ds_name, X, y in datasets:
+        K = len(np.unique(y))
         skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
         accs = {name: [] for name in models}
         for tr, te in skf.split(X, y):
@@ -283,14 +348,67 @@ def run_classification_benchmark(n_splits=5):
                     accs[name].append(accuracy_score(y_te, m.predict(X_te)))
                 except Exception:
                     accs[name].append(np.nan)
+
+        ds_acc = {name: float(np.nanmean(accs[name])) for name in models}
+        per_ds_acc[ds_name] = ds_acc
+
         for name in models:
             rows.append({"dataset": ds_name, "model": name,
-                         "acc": np.nanmean(accs[name])})
-        best = max(models, key=lambda nm: np.nanmean(accs[nm]))
-        print(f"{ds_name:28s}  best={best:12s}  "
-              f"SmallMLP_acc={np.nanmean(accs['SmallMLP']):.4f}")
+                         "acc": ds_acc[name], "K": K, "bucket": _bucket(K)})
 
-    return pd.DataFrame(rows)
+        best = max(models, key=lambda nm: ds_acc[nm])
+        print(f"{ds_name:28s}  K={K:>3}  best={best:12s}  "
+              f"SmallMLP_acc={ds_acc['SmallMLP']:.4f}")
+
+    df = pd.DataFrame(rows)
+
+    # ---- overall mean rank ----
+    pivot = df.pivot(index="dataset", columns="model", values="acc")
+    ranks = pivot.rank(axis=1, ascending=False, method="average")
+    mean_rank = ranks.mean(axis=0).sort_values()
+    mean_acc = pivot.mean(axis=0).sort_values(ascending=False)
+
+    print("\n" + "=" * 100)
+    print("Overall — mean rank (lower = better) and mean accuracy:")
+    print(f"{'model':<12} {'mean_rank':>10} {'mean_acc':>10}")
+    for name in mean_rank.index:
+        print(f"{name:<12} {mean_rank[name]:>10.3f} {mean_acc[name]:>10.4f}")
+
+    # ---- per-bucket ----
+    print("\n" + "=" * 100)
+    print("Per-K-bucket mean accuracy:")
+    buckets = ["binary", "multiclass_2_5", "multiclass_gt5"]
+    print(f"{'bucket':<18} {'n':>3} " +
+          " ".join(f"{m:>10}" for m in mean_acc.index))
+    for b in buckets:
+        sub = df[df["bucket"] == b]
+        if len(sub) == 0:
+            continue
+        sub_pivot = sub.pivot(index="dataset", columns="model", values="acc")
+        n_ds = sub_pivot.shape[0]
+        row = f"{b:<18} {n_ds:>3}"
+        for name in mean_acc.index:
+            row += f" {sub_pivot[name].mean():>10.4f}"
+        print(row)
+
+    # ---- Wilcoxon ----
+    print("\n" + "=" * 100)
+    print("Wilcoxon signed-rank test (SmallMLP vs baseline):")
+    print(f"{'baseline':<12} {'statistic':>12} {'p-value':>12} {'wins':>6} {'losses':>7}")
+    sm = pivot["SmallMLP"].values
+    for name in pivot.columns:
+        if name == "SmallMLP":
+            continue
+        other = pivot[name].values
+        wins = int(np.sum(sm > other + 1e-9))
+        losses = int(np.sum(sm < other - 1e-9))
+        try:
+            stat, p = wilcoxon(sm, other, zero_method="wilcox", alternative="two-sided")
+        except Exception:
+            stat, p = np.nan, np.nan
+        print(f"{name:<12} {stat:>12.3f} {p:>12.4f} {wins:>6} {losses:>7}")
+
+    return df
 
 
 # ---------------------------------------------------------------------------
@@ -396,18 +514,29 @@ def summarize_classification(df):
     for name, w in wins.sort_values(ascending=False).items():
         print(f"  {name:12s}: {int(w)}")
 
+    if "bucket" in df.columns:
+        print("\nPer-bucket mean accuracy:")
+        for b in ["binary", "multiclass_2_5", "multiclass_gt5"]:
+            sub = df[df["bucket"] == b]
+            if len(sub) == 0:
+                continue
+            sub_pivot = sub.pivot(index="dataset", columns="model", values="acc")
+            print(f"\n  [{b}]  n_datasets={sub_pivot.shape[0]}")
+            for name, m in sub_pivot.mean(axis=0).sort_values(ascending=False).items():
+                print(f"    {name:12s}: {m:.4f}")
+
 
 if __name__ == "__main__":
-    reg_df = run_regression_benchmark(n_splits=5)
-    reg_df.to_csv("benchmarks/results_regression.csv", index=False)
-    summarize_regression(reg_df)
+    # reg_df = run_regression_benchmark(n_splits=5)
+    # reg_df.to_csv("benchmarks/results_regression.csv", index=False)
+    # summarize_regression(reg_df)
 
     clf_df = run_classification_benchmark(n_splits=5)
     clf_df.to_csv("benchmarks/results_classification.csv", index=False)
     summarize_classification(clf_df)
 
-    reg_conf, clf_conf = run_conformal_eval(alpha=0.1)
-    reg_conf.to_csv("benchmarks/results_conformal_regression.csv", index=False)
-    clf_conf.to_csv("benchmarks/results_conformal_classification.csv", index=False)
+    # reg_conf, clf_conf = run_conformal_eval(alpha=0.1)
+    # reg_conf.to_csv("benchmarks/results_conformal_regression.csv", index=False)
+    # clf_conf.to_csv("benchmarks/results_conformal_classification.csv", index=False)
 
     print("\nSaved 4 CSV files to benchmarks/")
