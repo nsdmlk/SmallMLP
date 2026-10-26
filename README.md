@@ -376,7 +376,4 @@ MIT License. See `LICENSE` for details.
 
 ## Acknowledgments
 
-Built independently during undergraduate studies at Beijing Institute of Technology. Inspired by the author's earlier work on robust gradient boosting for small data ([SmallGBM](https://github.com/nsdmlk/smallgbm)).
-
-
-**Проверь, что в `Results` таблица согласована с реальными числами** — если после обновления кода числа изменились, обнови таблицу.
+Built independently during undergraduate studies at Beijing Institute of Technology. Inspired by the author's earlier work on robust gradient boosting for small data ([SmallGBM](https://github.com/nsdmlk/smallgbm))
