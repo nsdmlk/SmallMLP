@@ -3,7 +3,7 @@
 > Adaptive neural networks for small nonlinear data, with calibrated conformal intervals.
 
 <p align="center">
-  <a href="https://pypi.org/project/smallmlp/"><img src="https://img.shields.io/badge/pypi-v0.2.0-blue.svg" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/smallmlp/"><img src="https://img.shields.io/badge/pypi-v0.4.0-blue.svg" alt="PyPI version"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <a href="https://github.com/YDX-2147483647/best-of-bits"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/YDX-2147483647/best-of-bits/main/config/badge/v1.json" alt="best of BITs"></a>
