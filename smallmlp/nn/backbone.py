@@ -99,7 +99,7 @@ class _Backbone(nn.Module):
     """
 
     def __init__(self, d_in, n, K=2, dropout=0.0, activation="relu",
-                 n_layers=2, width_mode="formula", alpha=4.0, beta=0.7,
+                 n_layers=2, width_mode="formula", alpha=6.0, beta=0.7,
                  bias_init="kaiming"):
         super().__init__()
 

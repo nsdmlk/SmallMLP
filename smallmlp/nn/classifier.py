@@ -37,7 +37,7 @@ class SmallMLPClassifier(BaseEstimator, ClassifierMixin):
                  max_epochs=500, patience=30, batch_size=None,
                  val_frac=0.2, class_weight=None, random_state=42,
                  verbose=False, width_mode="formula",
-                 alpha=4.0, beta=0.7, bias_init="kaiming"):
+                 alpha=6.0, beta=0.7, bias_init="kaiming"):
         self.activation = activation
         self.lr = lr
         self.weight_decay = weight_decay
