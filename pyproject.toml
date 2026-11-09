@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "smallmlp"
-version = "0.3.0"
+version = "0.4.0"
 description = "Adaptive neural networks for small nonlinear data, with calibrated conformal intervals."
 readme = "README.md"
 requires-python = ">=3.10"
