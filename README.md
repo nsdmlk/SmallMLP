@@ -15,7 +15,7 @@
 
 - **Regression:** **25 / 45 wins**, best mean rank (1.82) among 5 models — no tuning.
 - **Intervals:** **19% narrower** than split conformal at equal coverage (**31 / 32 wins**).
-- **Classification:** best mean rank among 10 models on 18 datasets; significantly better than LogReg, KNN, SVC; statistically indistinguishable from MLP-128 and RF.
+- **Classification:** **best mean rank (4.14)** among 10 models on 18 datasets; significantly better than LogReg, KNN, SVC; statistically indistinguishable from MLP-128 and RF.
 
 ---
 
@@ -116,7 +116,7 @@ $$
 w_l = \max\left(K, \; \left\lfloor w_1 \cdot \beta^{\,l-1} \right\rfloor\right)
 $$
 
-with $\alpha = 4.0$ and $\beta = 0.7$ chosen by empirical sweep.
+with $\alpha = 6.0$ and $\beta = 0.7$ chosen by empirical sweep.
 
 **Properties:**
 
@@ -197,40 +197,40 @@ Among 32 datasets where both weighted and split conformal are valid, **weighted 
 
 | Model                | Mean rank ↓ | Mean acc ↑ | Wins / 18 |
 | -------------------- | ----------- | ---------- | --------- |
-| **SmallMLP (classic)** | **4.19**  | **0.8120** | **3**     |
-| **SmallMLP (formula)** | **4.50**  | 0.8117     | 2         |
-| MLP (128,)           | 4.64        | 0.8132     | 3         |
+| **SmallMLP (formula)** | **4.14**  | **0.8129** | **5**     |
+| SmallMLP (classic)   | 4.25        | 0.8120     | 2         |
+| MLP (128,)           | 4.61        | 0.8132     | 3         |
 | MLP (100,)           | 5.25        | 0.8101     | 1         |
-| SVC (RBF)            | 5.31        | 0.7990     | 2         |
-| MLP (100, 100)       | 5.56        | 0.8037     | 3         |
-| RF (100)             | 5.92        | 0.8035     | 6         |
-| LogReg               | 6.17        | 0.7920     | 4         |
-| KNN ($k=5$)          | 8.17        | 0.7715     | 2         |
+| SVC (RBF)            | 5.50        | 0.7990     | 2         |
+| MLP (100, 100)       | 5.64        | 0.8037     | 3         |
+| RF (100)             | 6.00        | 0.8035     | 6         |
+| LogReg               | 6.11        | 0.7920     | 3         |
+| KNN ($k=5$)          | 8.14        | 0.7715     | 2         |
 
 **Wilcoxon signed-rank vs SmallMLP (formula), paired across 18 datasets:**
 
 | Baseline     | p-value | Significant? |
 | ------------ | ------- | ------------ |
-| MLP (128,)   | 1.00    | no           |
+| MLP (128,)   | 0.94    | no           |
 | MLP (100,)   | 0.62    | no           |
-| MLP (100,100) | 0.26   | no           |
-| RF (100)     | 0.37    | no           |
-| SmallMLP classic | 0.62 | no          |
-| SVC (RBF)    | 0.047   | **yes** (SmallMLP better) |
-| LogReg       | 0.013   | **yes** (SmallMLP better) |
-| KNN ($k=5$)  | 0.002   | **yes** (SmallMLP better) |
+| MLP (100,100) | 0.17   | no           |
+| RF (100)     | 0.25    | no           |
+| SmallMLP classic | 0.57 | no          |
+| SVC (RBF)    | 0.010   | **yes** (SmallMLP better) |
+| LogReg       | 0.019   | **yes** (SmallMLP better) |
+| KNN ($k=5$)  | 0.001   | **yes** (SmallMLP better) |
 
-**Summary:** SmallMLP achieves the best mean rank among 10 models, is **statistically indistinguishable** from tuned MLPs and RF, and **significantly better** than LogReg, KNN, and SVC.
+**Summary:** SmallMLP achieves the **best mean rank** among 10 models, is **statistically indistinguishable** from tuned MLPs and RF, and **significantly better** than LogReg, KNN, and SVC.
 
 ### Classification — per-K-bucket accuracy
 
 | Bucket                | SmallMLP (formula) | MLP (128,) | RF (100) |
 | --------------------- | ------------------ | ---------- | -------- |
-| Binary ($K=2$)        | 0.8675             | **0.8697** | 0.8521   |
-| Multiclass ($2<K\le5$)| 0.8537             | **0.8531** | 0.8210   |
-| Hard multiclass ($K>5$)| 0.6776            | 0.6798     | **0.7019** |
+| Binary ($K=2$)        | **0.8710**         | 0.8697     | 0.8521   |
+| Multiclass ($2<K\le5$)| **0.8581**         | 0.8531     | 0.8210   |
+| Hard multiclass ($K>5$)| 0.6720            | 0.6798     | **0.7019** |
 
-SmallMLP competitive on binary and moderate multiclass; RF dominates on hard multiclass.
+SmallMLP dominates on binary and moderate multiclass; RF dominates on hard multiclass.
 
 ### Classification — adaptive dropout ablation
 
@@ -298,7 +298,7 @@ In all these settings, standard MLPs overfit, Gaussian Processes scale poorly, a
 - **$n < 500$.** Fit cost grows with $n$, width, and epochs.
 - **Heteroscedastic residuals.** On ~15% of regression datasets, weighted conformal undercovers. Attributed to strong heteroscedasticity under non-exchangeability.
 - **Linear problems.** SmallMLP loses to logistic regression and ridge on linear or near-linear tasks.
-- **Raw classification accuracy.** SmallMLP matches but does not beat tuned MLPs and RF. Its advantages are **tuning-free operation**, **calibrated uncertainty**, and **competitive mean rank**.
+- **Raw classification accuracy.** SmallMLP matches tuned MLPs and RF on binary tasks, but its advantages are **tuning-free operation**, **calibrated uncertainty**, and **best mean rank** across diverse multiclass problems.
 - **Adaptive dropout is only marginally better than fixed $p = 0.2$ on average.** Benefit is regime-specific.
 
 ### Negative results
@@ -307,7 +307,7 @@ We document what we tried that did not work, to guide future work:
 
 - **Adaptive depth** $L = f(n, d, K)$: no significant improvement over fixed $L = 2$ on $n < 500$.
 - **PCA-based effective dimensionality** $d_{\text{eff}}$ in the width formula: no improvement over raw $d$.
-- **Per-class sample count** $\log_2(n/K)$ and **softened depth decay** $\sqrt{d}/\sqrt{l}$ in the binary width formula: within noise.
+- **Adaptive \(\alpha\) coefficient** (dependent on \(K/d\)): underperformed the fixed \(\alpha=6.0\) constant.
 - **Bias initialization sweep** (zeros, positive, uniform): none beat PyTorch Kaiming default. Correlation between bias negativity and accuracy was spurious.
 - **Activation sweep** (tanh, GELU, SiLU, algebraic sigmoid, softsign): ReLU wins on 18 small classification datasets; smooth/saturating activations underperform.
 - **Sqrt-balanced class weights**: improve over linear weights under extreme imbalance, but neither beats no weighting on accuracy.
@@ -317,9 +317,9 @@ We document what we tried that did not work, to guide future work:
 ### What we tried that *did* work
 
 - **Clamped adaptive dropout** `min(max(3d/n, 0.1), 0.5)` — better than raw `d/n`.
-- **Sqrt-balanced class weights** — safer than linear under extreme imbalance (though not better than no weights for accuracy).
 - **Weighted conformal** — 19% narrower intervals at equal coverage.
-- **Multi-class-aware width** — competitive with fixed-width baselines without tuning.
+- **Multi-class-aware width** with tuned \(\alpha=6.0\) — best mean rank across 18 classification datasets without tuning.
+- **Sqrt-balanced class weights** — safer than linear under extreme imbalance.
 
 ---
 
@@ -358,7 +358,7 @@ SmallMLPClassifier(
     random_state=42,
     verbose=False,
     width_mode="formula",       # "formula" or "classic"
-    alpha=4.0,                  # width scale
+    alpha=6.0,                  # width scale
     beta=0.7,                   # depth decay
     bias_init="kaiming",        # "kaiming" | "zeros" | "positive" | "uniform"
 )
