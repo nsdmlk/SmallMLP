@@ -23,13 +23,13 @@
 
 Standard MLPs need architecture search. Kernel methods need bandwidth tuning. Bayesian methods scale poorly. SmallMLP removes all three problems:
 
-| Property                                | Standard MLP | GP | SmallMLP |
-| --------------------------------------- | ------------ | -- | -------- |
-| Works on small data ($n < 500$)         | ✗            | ✓  | ✓        |
-| No hyperparameter tuning                | ✗            | ✗  | ✓        |
-| Prediction intervals / sets             | ✗            | ✓  | ✓        |
-| Trains in seconds on $n < 500$          | ✓            | ✗  | ✓        |
-| Multiclass-aware width                  | ✗            | —  | ✓        |
+| Property                          | Standard MLP | GP | SmallMLP |
+| --------------------------------- | ------------ | -- | -------- |
+| Works on small data ($n < 500$) | ✗           | ✓ | ✓       |
+| No hyperparameter tuning          | ✗           | ✗ | ✓       |
+| Prediction intervals / sets       | ✗           | ✓ | ✓       |
+| Trains in seconds on $n < 500$  | ✓           | ✗ | ✓       |
+| Multiclass-aware width            | ✗           | — | ✓       |
 
 **Adaptive by construction.** Layer width, dropout, and weight decay are **computed from dataset parameters** — not searched.
 
@@ -169,13 +169,13 @@ This gives:
 
 45 small regression datasets ($n < 500$), 5-fold CV, mean absolute error.
 
-| Model              | Mean rank ↓ | Mean MAE ↓ | Wins / 45 |
-| ------------------ | ----------- | ---------- | --------- |
-| **SmallMLP**       | **1.82**    | **8.43**   | **25**    |
-| RF (100)           | 2.33        | 13.58      | 14        |
-| MLP (256, 128)     | 3.22        | 11.57      | 4         |
-| KNN ($k=5$)        | 3.67        | 18.89      | 1         |
-| MLP (100,)         | 3.96        | 19.07      | 1         |
+| Model              | Mean rank ↓   | Mean MAE ↓    | Wins / 45    |
+| ------------------ | -------------- | -------------- | ------------ |
+| **SmallMLP** | **1.82** | **8.43** | **25** |
+| RF (100)           | 2.33           | 13.58          | 14           |
+| MLP (256, 128)     | 3.22           | 11.57          | 4            |
+| KNN ($k=5$)      | 3.67           | 18.89          | 1            |
+| MLP (100,)         | 3.96           | 19.07          | 1            |
 
 **SmallMLP beats MLP (256, 128) by 27% on MAE** without any tuning.
 
@@ -183,11 +183,11 @@ This gives:
 
 45 datasets, $\alpha = 0.1$ (target coverage ≥ 0.90), 60/20/20 split.
 
-| Method                          | Valid (cov ≥ 0.88) | Mean width among valid ↓ |
-| ------------------------------- | ------------------ | ------------------------ |
-| **Weighted conformal**          | **38 / 45**        | **51.8**                 |
-| Split conformal                 | 32 / 45            | 64.0                     |
-| Heuristic $\hat{y} \pm z\sigma$ | 17 / 45            | 145.7                    |
+| Method                            | Valid (cov ≥ 0.88) | Mean width among valid ↓ |
+| --------------------------------- | ------------------- | ------------------------- |
+| **Weighted conformal**      | **38 / 45**   | **51.8**            |
+| Split conformal                   | 32 / 45             | 64.0                      |
+| Heuristic $\hat{y} \pm z\sigma$ | 17 / 45             | 145.7                     |
 
 Among 32 datasets where both weighted and split conformal are valid, **weighted conformal produces narrower intervals on 31** (mean width ratio **0.81**).
 
@@ -195,40 +195,40 @@ Among 32 datasets where both weighted and split conformal are valid, **weighted 
 
 18 small classification datasets, 5-fold CV, 10 models. Metric: **mean rank** (lower is better, rank 1 = best on that dataset).
 
-| Model                | Mean rank ↓ | Mean acc ↑ | Wins / 18 |
-| -------------------- | ----------- | ---------- | --------- |
-| **SmallMLP (formula)** | **4.14**  | **0.8129** | **5**     |
-| SmallMLP (classic)   | 4.25        | 0.8120     | 2         |
-| MLP (128,)           | 4.61        | 0.8132     | 3         |
-| MLP (100,)           | 5.25        | 0.8101     | 1         |
-| SVC (RBF)            | 5.50        | 0.7990     | 2         |
-| MLP (100, 100)       | 5.64        | 0.8037     | 3         |
-| RF (100)             | 6.00        | 0.8035     | 6         |
-| LogReg               | 6.11        | 0.7920     | 3         |
-| KNN ($k=5$)          | 8.14        | 0.7715     | 2         |
+| Model                        | Mean rank ↓   | Mean acc ↑      | Wins / 18   |
+| ---------------------------- | -------------- | ---------------- | ----------- |
+| **SmallMLP (formula)** | **4.14** | **0.8129** | **5** |
+| SmallMLP (classic)           | 4.25           | 0.8120           | 2           |
+| MLP (128,)                   | 4.61           | 0.8132           | 3           |
+| MLP (100,)                   | 5.25           | 0.8101           | 1           |
+| SVC (RBF)                    | 5.50           | 0.7990           | 2           |
+| MLP (100, 100)               | 5.64           | 0.8037           | 3           |
+| RF (100)                     | 6.00           | 0.8035           | 6           |
+| LogReg                       | 6.11           | 0.7920           | 3           |
+| KNN ($k=5$)                | 8.14           | 0.7715           | 2           |
 
 **Wilcoxon signed-rank vs SmallMLP (formula), paired across 18 datasets:**
 
-| Baseline     | p-value | Significant? |
-| ------------ | ------- | ------------ |
-| MLP (128,)   | 0.94    | no           |
-| MLP (100,)   | 0.62    | no           |
-| MLP (100,100) | 0.17   | no           |
-| RF (100)     | 0.25    | no           |
-| SmallMLP classic | 0.57 | no          |
-| SVC (RBF)    | 0.010   | **yes** (SmallMLP better) |
-| LogReg       | 0.019   | **yes** (SmallMLP better) |
-| KNN ($k=5$)  | 0.001   | **yes** (SmallMLP better) |
+| Baseline         | p-value | Significant?                    |
+| ---------------- | ------- | ------------------------------- |
+| MLP (128,)       | 0.94    | no                              |
+| MLP (100,)       | 0.62    | no                              |
+| MLP (100,100)    | 0.17    | no                              |
+| RF (100)         | 0.25    | no                              |
+| SmallMLP classic | 0.57    | no                              |
+| SVC (RBF)        | 0.010   | **yes** (SmallMLP better) |
+| LogReg           | 0.019   | **yes** (SmallMLP better) |
+| KNN ($k=5$)    | 0.001   | **yes** (SmallMLP better) |
 
 **Summary:** SmallMLP achieves the **best mean rank** among 10 models, is **statistically indistinguishable** from tuned MLPs and RF, and **significantly better** than LogReg, KNN, and SVC.
 
 ### Classification — per-K-bucket accuracy
 
-| Bucket                | SmallMLP (formula) | MLP (128,) | RF (100) |
-| --------------------- | ------------------ | ---------- | -------- |
-| Binary ($K=2$)        | **0.8710**         | 0.8697     | 0.8521   |
-| Multiclass ($2<K\le5$)| **0.8581**         | 0.8531     | 0.8210   |
-| Hard multiclass ($K>5$)| 0.6720            | 0.6798     | **0.7019** |
+| Bucket                    | SmallMLP (formula) | MLP (128,) | RF (100)         |
+| ------------------------- | ------------------ | ---------- | ---------------- |
+| Binary ($K=2$)          | **0.8710**   | 0.8697     | 0.8521           |
+| Multiclass ($2<K\le5$)  | **0.8581**   | 0.8531     | 0.8210           |
+| Hard multiclass ($K>5$) | 0.6720             | 0.6798     | **0.7019** |
 
 SmallMLP dominates on binary and moderate multiclass; RF dominates on hard multiclass.
 
@@ -236,11 +236,11 @@ SmallMLP dominates on binary and moderate multiclass; RF dominates on hard multi
 
 9 small classification datasets, 10-fold CV, accuracy.
 
-| Dropout mode                                      | Mean accuracy ↑ |
-| ------------------------------------------------- | --------------- |
-| Unclamped $\min(d/n, \; 0.5)$                     | 0.8214          |
-| **Clamped $\min(\max(3d/n, \; 0.1), \; 0.5)$**    | **0.8269**      |
-| Fixed $p = 0.2$                                   | 0.8278          |
+| Dropout mode                                           | Mean accuracy ↑ |
+| ------------------------------------------------------ | ---------------- |
+| Unclamped $\min(d/n, \; 0.5)$                        | 0.8214           |
+| **Clamped $\min(\max(3d/n, \; 0.1), \; 0.5)$** | **0.8269** |
+| Fixed $p = 0.2$                                      | 0.8278           |
 
 Clamped dropout matches fixed $p = 0.2$ within noise; advantage concentrated on multiclass ($K \geq 6$) and high-dimensional ($d \geq 30$) datasets.
 
@@ -248,16 +248,16 @@ Clamped dropout matches fixed $p = 0.2$ within noise; advantage concentrated on 
 
 15 small datasets (binary and multiclass), 60/20/20 split, $\alpha = 0.1$.
 
-| Dataset        | $K$ | Coverage | Avg set size |
-| -------------- | --- | -------- | ------------ |
-| iris           | 3   | 1.00     | 1.07         |
-| wine           | 3   | 0.97     | 1.00         |
-| breast cancer  | 2   | 0.97     | 1.00         |
-| hepatitis      | 2   | 0.90     | 1.26         |
-| parkinsons     | 2   | 1.00     | 1.05         |
-| ionosphere     | 2   | 0.93     | 1.06         |
-| banknote       | 2   | 0.99     | 1.00         |
-| vowel ($K=26$) | 26  | 0.92     | 2.54         |
+| Dataset          | $K$ | Coverage | Avg set size |
+| ---------------- | ----- | -------- | ------------ |
+| iris             | 3     | 1.00     | 1.07         |
+| wine             | 3     | 0.97     | 1.00         |
+| breast cancer    | 2     | 0.97     | 1.00         |
+| hepatitis        | 2     | 0.90     | 1.26         |
+| parkinsons       | 2     | 1.00     | 1.05         |
+| ionosphere       | 2     | 0.93     | 1.06         |
+| banknote         | 2     | 0.99     | 1.00         |
+| vowel ($K=26$) | 26    | 0.92     | 2.54         |
 
 Coverage **≥ 0.90** on the majority of datasets; set size **close to 1** on easy problems, **grows** on hard multiclass ones.
 
@@ -318,7 +318,7 @@ We document what we tried that did not work, to guide future work:
 
 - **Clamped adaptive dropout** `min(max(3d/n, 0.1), 0.5)` — better than raw `d/n`.
 - **Weighted conformal** — 19% narrower intervals at equal coverage.
-- **Multi-class-aware width** with tuned \(\alpha=6.0\) — best mean rank across 18 classification datasets without tuning.
+- **Multi-class-aware width** with tuned \($\alpha=6.0$\) — best mean rank across 18 classification datasets without tuning.
 - **Sqrt-balanced class weights** — safer than linear under extreme imbalance.
 
 ---
